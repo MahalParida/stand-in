@@ -19,8 +19,8 @@ const withDefault = <T extends z.ZodType>(schema: T) =>
 export const StandinModeSchema = z.enum(['offline', 'aws']);
 export type StandinMode = z.infer<typeof StandinModeSchema>;
 
-/** Offline LLM choice. In aws mode the LLM is always Bedrock. */
-export const OfflineLlmSchema = z.enum(['scripted', 'localllm']);
+/** Offline LLM choice. In aws mode the LLM is always Bedrock (OpenAI is never used there). */
+export const OfflineLlmSchema = z.enum(['scripted', 'openai']);
 export type OfflineLlm = z.infer<typeof OfflineLlmSchema>;
 
 export const RepoKindSchema = z.enum(['sqlite', 'dynamo']);
@@ -40,10 +40,13 @@ export const ProvidersEnvSchema = z
     STANDIN_REPO: withDefault(RepoKindSchema.default('sqlite')),
     SQLITE_PATH: withDefault(z.string().min(1).default(':memory:')),
 
-    LOCAL_LLM_BASE_URL: withDefault(z.url().default('http://localhost:11434/v1')),
-    LOCAL_LLM_MODEL: withDefault(z.string().min(1).default('local-model')),
-    LOCAL_LLM_REASONING_EFFORT: withDefault(z.enum(['none', 'low', 'medium', 'high']).default('none')),
-    LOCAL_LLM_TIMEOUT_MS: withDefault(z.coerce.number().int().positive().default(60_000)),
+    /** Optional real LLM for local demo/eval (STANDIN_LLM=openai). Never used in aws mode. */
+    OPENAI_API_KEY: optionalString,
+    OPENAI_MODEL: optionalString,
+    OPENAI_BASE_URL: withDefault(z.url().default('https://api.openai.com/v1')),
+    /** 'off' for non-reasoning models; otherwise sent as reasoning_effort. */
+    OPENAI_REASONING_EFFORT: withDefault(z.enum(['off', 'minimal', 'low', 'medium', 'high']).default('off')),
+    OPENAI_TIMEOUT_MS: withDefault(z.coerce.number().int().positive().default(60_000)),
 
     AWS_REGION: optionalString,
     BEDROCK_MODEL_ID: optionalString,
@@ -61,7 +64,16 @@ export const ProvidersEnvSchema = z
     SCHEDULER_GROUP_NAME: withDefault(z.string().regex(/^[0-9a-zA-Z-_.]{1,64}$/).default('default')),
   })
   .superRefine((env, ctx) => {
-    if (env.STANDIN_MODE !== 'aws') return;
+    if (env.STANDIN_MODE !== 'aws') {
+      if (env.STANDIN_LLM === 'openai') {
+        for (const key of ['OPENAI_API_KEY', 'OPENAI_MODEL'] as const) {
+          if (env[key] === undefined) {
+            ctx.addIssue({ code: 'custom', path: [key], message: `${key} is required when STANDIN_LLM=openai` });
+          }
+        }
+      }
+      return;
+    }
     if (env.SCHEDULER === 'eventbridge') {
       for (const key of ['SCHEDULER_TARGET_ARN', 'SCHEDULER_ROLE_ARN'] as const) {
         if (env[key] === undefined) {

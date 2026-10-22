@@ -7,7 +7,7 @@
  *  - the hold length (0.5x-2.5x the preset),
  *  - the ticket number Ravi issues (and, for S6, the one the follow-up must quote
  *    plus the supervisor's new one),
- *  - the LLM sampling: temperature 0.3 and the seed itself (passed to LocalLlm).
+ *  - the LLM sampling: temperature 0.3 and the seed itself (honoured by OpenAI).
  */
 import { FollowupSchema, SCENARIO_PRESETS, SeededRng, type FakeBusinessScenarioInput, type ScenarioPresetName } from '@standin/fake-business';
 
@@ -23,7 +23,7 @@ export interface SeedVariation {
   ticketId?: string;
   /** Ticket the supervisor issues on the S6 follow-up (undefined = the preset's). */
   escalationTicketId?: string;
-  /** LLM planner sampling for localllm / bedrock runs. */
+  /** LLM planner sampling for openai / bedrock runs. */
   temperature: number;
 }
 

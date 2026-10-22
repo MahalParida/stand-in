@@ -10,7 +10,7 @@ The call runtime (spec section 5): `CallSession` drives core's pure state machin
 | `CallSession` | `start()`, `snapshot()` → `{state, holdSeconds, lastLines, pendingQuestion?, outcome?, failureReason?, failureMessage?}`, `acceptHandoff()`, `declineHandoff()`, `userLeave()`, `answerPending(text, questionId?)`, `end()`, `events()`, `verify()`, `idle()`, `done`, `onChange(cb)`, `onFactAdded(cb)` |
 | `SimCarrier` | A core `Carrier` linked in-process to a `FakeBusiness` through an EventEmitter. It refuses non-allowlisted numbers, and `userSay()` carries the bridged user's own voice. |
 | `ScriptedPlanner` / `scriptedPolicy` | A deterministic policy with no LLM. It is the default for eval and offline mode. |
-| `LlmPlanner(llm)` | Works with any core `LlmProvider` (LocalLlm or Bedrock). Its output is parsed with core's `PlannerOutputSchema`. Invalid JSON, a schema failure or a provider error each produce a safe fallback plus an `error` event. |
+| `LlmPlanner(llm)` | Works with any core `LlmProvider` (OpenAI or Bedrock). Its output is parsed with core's `PlannerOutputSchema`. Invalid JSON, a schema failure or a provider error each produce a safe fallback plus an `error` event. |
 | `createPolicyLlm()` / `GarbageInjectingLlm` | The scripted policy exposed through the real prompt → JSON → zod path, plus a garbage injector for S8. |
 
 ## Safety properties (tested)

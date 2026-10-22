@@ -198,11 +198,11 @@ export interface LlmPlannerOptions {
   temperature?: number;
   /** Clamped to MAX_LLM_OUTPUT_TOKENS (512). */
   maxTokens?: number;
-  /** Sampling seed for providers that support one (LocalLlm); seeded eval runs. */
+  /** Sampling seed for providers that support one (OpenAI); seeded eval runs. */
   seed?: number;
 }
 
-/** Planner backed by any LlmProvider (LocalLlm, Bedrock, scripted). */
+/** Planner backed by any LlmProvider (OpenAI, Bedrock, scripted). */
 export class LlmPlanner implements Planner {
   readonly name: string;
   readonly #llm: LlmProvider;

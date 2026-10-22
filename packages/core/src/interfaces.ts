@@ -47,7 +47,7 @@ export const ChatRequestSchema = z.object({
   json: z.boolean().optional(),
   temperature: z.number().min(0).max(2).optional(),
   maxTokens: z.number().int().positive().optional(),
-  /** Sampling seed for providers that support one (LocalLlm); used by seeded eval runs. */
+  /** Sampling seed for providers that support one (OpenAI); used by seeded eval runs. */
   seed: z.number().int().min(0).max(0x7fff_ffff).optional(),
 });
 export type ChatRequest = z.infer<typeof ChatRequestSchema>;

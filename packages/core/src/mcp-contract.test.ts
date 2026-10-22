@@ -182,6 +182,7 @@ describe('sim host API', () => {
     expect(SimTtsRequestSchema.safeParse({ text: 'a'.repeat(SIM_TTS_MAX_CHARS + 1), voice: 'standin' }).success).toBe(false);
     expect(SimConfigSchema.safeParse({ mode: 'offline', llm: 'scripted', tts: 'browser' }).success).toBe(true);
     expect(SimConfigSchema.safeParse({ mode: 'aws', llm: 'bedrock', tts: 'polly', demoToken: 'tok' }).success).toBe(true);
+    expect(SimConfigSchema.safeParse({ mode: 'offline', llm: 'openai', tts: 'browser' }).success).toBe(true);
     expect(SimConfigSchema.safeParse({ mode: 'cloud', llm: 'scripted', tts: 'browser' }).success).toBe(false);
   });
 });

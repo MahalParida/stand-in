@@ -1,8 +1,7 @@
 /**
- * Local LLM via LocalLlm's OpenAI-compatible endpoint (offline fallback, spec 2.1).
+ * Real LLM via an OpenAI-compatible chat completions endpoint (local dev/eval
+ * only; never selected in STANDIN_MODE=aws, which always uses Bedrock).
  * POST {baseUrl}/chat/completions, JSON mode via response_format.
- * With `apiKey` + `dialect: 'openai'` the same adapter talks to the OpenAI API
- * (eval-only fast path; never selected by the server).
  */
 import { ChatRequestSchema, type ChatRequest, type LlmProvider } from '@standin/core';
 import { z } from 'zod';
@@ -10,35 +9,27 @@ import { LlmProviderError, LlmTimeoutError, stripJsonFence, timeoutSignal } from
 
 export type FetchLike = (input: string, init: RequestInit) => Promise<Response>;
 
-export const LocalLlmOptionsSchema = z.object({
-  baseUrl: z.url().default('http://localhost:11434/v1'),
-  model: z.string().min(1).default('local-model'),
+export const OpenAiReasoningEffortSchema = z.enum(['minimal', 'low', 'medium', 'high']);
+export type OpenAiReasoningEffort = z.infer<typeof OpenAiReasoningEffortSchema>;
+
+export const OpenAiOptionsSchema = z.object({
+  baseUrl: z.url().default('https://api.openai.com/v1'),
+  model: z.string().min(1),
+  /** Sent as `Authorization: Bearer`; never echoed in errors. */
+  apiKey: z.string().min(1),
   timeoutMs: z.number().int().positive().default(60_000),
   /**
-   * Thinking models (local-model etc.) spend max_tokens on hidden reasoning and can
-   * return empty content. 'none' disables it, which the per-turn planner wants.
+   * Reasoning models (gpt-5 family) reject any temperature but the default and
+   * spend output tokens on hidden reasoning: when set, send reasoning_effort,
+   * omit temperature and add headroom to max_completion_tokens. Leave unset for
+   * non-reasoning models (they reject reasoning_effort).
    */
-  reasoningEffort: z.enum(['none', 'low', 'medium', 'high']).default('none'),
-  /** Sent as `Authorization: Bearer`; required by the OpenAI API, unused by LocalLlm. */
-  apiKey: z.string().min(1).optional(),
-  /**
-   * 'localllm' sends reasoning_effort + max_tokens; 'openai' omits reasoning_effort
-   * (rejected by non-reasoning models) and sends max_completion_tokens.
-   */
-  dialect: z.enum(['localllm', 'openai']).default('localllm'),
-  /**
-   * openai dialect only. Reasoning models (gpt-5 family) reject any temperature
-   * but the default and spend output tokens on hidden reasoning: when set, send
-   * reasoning_effort, omit temperature and add headroom to max_completion_tokens.
-   * Leave unset for non-reasoning models.
-   */
-  openaiReasoningEffort: z.enum(['minimal', 'low', 'medium', 'high']).optional(),
+  openaiReasoningEffort: OpenAiReasoningEffortSchema.optional(),
 });
 
-/** Extra completion budget for hidden reasoning (openai reasoning models). */
+/** Extra completion budget for hidden reasoning (reasoning models). */
 export const OPENAI_REASONING_HEADROOM_TOKENS = 2000;
-export type LocalLlmReasoningEffort = z.infer<typeof LocalLlmOptionsSchema>['reasoningEffort'];
-export type LocalLlmOptions = z.input<typeof LocalLlmOptionsSchema> & { fetch?: FetchLike };
+export type OpenAiOptions = z.input<typeof OpenAiOptionsSchema> & { fetch?: FetchLike };
 
 const CompletionSchema = z.object({
   choices: z
@@ -50,33 +41,28 @@ const CompletionSchema = z.object({
     .min(1),
 });
 
-export class LocalLlmProvider implements LlmProvider {
-  readonly name: 'localllm' | 'openai';
+export class OpenAiProvider implements LlmProvider {
+  readonly name = 'openai' as const;
   readonly baseUrl: string;
   readonly model: string;
   readonly timeoutMs: number;
-  readonly reasoningEffort: LocalLlmReasoningEffort;
-  readonly #apiKey: string | undefined;
-  readonly #openaiReasoning: 'minimal' | 'low' | 'medium' | 'high' | undefined;
+  readonly #apiKey: string;
+  readonly #reasoning: OpenAiReasoningEffort | undefined;
   readonly #fetch: FetchLike;
 
-  constructor(opts: LocalLlmOptions = {}) {
-    const o = LocalLlmOptionsSchema.parse({
+  constructor(opts: OpenAiOptions) {
+    const o = OpenAiOptionsSchema.parse({
       baseUrl: opts.baseUrl,
       model: opts.model,
-      timeoutMs: opts.timeoutMs,
-      reasoningEffort: opts.reasoningEffort,
       apiKey: opts.apiKey,
-      dialect: opts.dialect,
+      timeoutMs: opts.timeoutMs,
       openaiReasoningEffort: opts.openaiReasoningEffort,
     });
-    this.#openaiReasoning = o.dialect === 'openai' ? o.openaiReasoningEffort : undefined;
-    this.name = o.dialect;
     this.baseUrl = o.baseUrl.replace(/\/+$/, '');
     this.model = o.model;
     this.timeoutMs = o.timeoutMs;
-    this.reasoningEffort = o.reasoningEffort;
     this.#apiKey = o.apiKey;
+    this.#reasoning = o.openaiReasoningEffort;
     this.#fetch = opts.fetch ?? ((input, init) => fetch(input, init));
   }
 
@@ -87,16 +73,11 @@ export class LocalLlmProvider implements LlmProvider {
       messages: r.messages,
       stream: false,
     };
-    const reasoning = this.#openaiReasoning;
-    if (this.name === 'localllm') body.reasoning_effort = this.reasoningEffort;
+    const reasoning = this.#reasoning;
     if (reasoning !== undefined) body.reasoning_effort = reasoning;
     if (r.temperature !== undefined && reasoning === undefined) body.temperature = r.temperature;
     if (r.maxTokens !== undefined) {
-      if (this.name === 'openai') {
-        body.max_completion_tokens = r.maxTokens + (reasoning !== undefined ? OPENAI_REASONING_HEADROOM_TOKENS : 0);
-      } else {
-        body.max_tokens = r.maxTokens;
-      }
+      body.max_completion_tokens = r.maxTokens + (reasoning !== undefined ? OPENAI_REASONING_HEADROOM_TOKENS : 0);
     }
     if (r.seed !== undefined) body.seed = r.seed;
     if (r.json === true) body.response_format = { type: 'json_object' };
@@ -108,7 +89,7 @@ export class LocalLlmProvider implements LlmProvider {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
-          ...(this.#apiKey !== undefined ? { authorization: `Bearer ${this.#apiKey}` } : {}),
+          authorization: `Bearer ${this.#apiKey}`,
         },
         body: JSON.stringify(body),
         signal: t.signal,

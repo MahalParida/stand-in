@@ -483,7 +483,7 @@ export type SimTtsRequest = z.infer<typeof SimTtsRequestSchema>;
 export const SIM_TTS_AUDIO_MIME = 'audio/mpeg' as const;
 
 export const SimModeSchema = z.enum(['offline', 'aws']);
-export const SimLlmKindSchema = z.enum(['scripted', 'localllm', 'bedrock']);
+export const SimLlmKindSchema = z.enum(['scripted', 'openai', 'bedrock']);
 export const SimTtsKindSchema = z.enum(['browser', 'polly']);
 
 /** GET /sim/config. demoToken only when DEMO_EMBED_TOKEN=true (hosted judge demo). */

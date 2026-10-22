@@ -5,7 +5,7 @@
 import { systemClock, type Clock, type LlmProvider, type Repo, type TtsProvider } from '@standin/core';
 import { parseProvidersEnv, type ProvidersEnv, type StandinMode } from './env.js';
 import { BedrockProvider, type ConverseClient } from './llm/bedrock.js';
-import { LocalLlmProvider, type FetchLike } from './llm/localllm.js';
+import { OpenAiProvider, type FetchLike } from './llm/openai.js';
 import { ScriptedLlmProvider, defaultOfflineScript, type ScriptedLlmOptions } from './llm/scripted.js';
 import { DynamoRepo, createSqliteRepo } from './repo/index.js';
 import { EventBridgeScheduler, type SchedulerClientLike } from './scheduler/eventbridge.js';
@@ -17,7 +17,7 @@ export interface ProviderOverrides {
   clock?: Clock;
   /** Script for the offline ScriptedLlmProvider (defaults to a safe "wait"). */
   scripted?: ScriptedLlmOptions;
-  /** fetch used by LocalLlmProvider (tests). */
+  /** fetch used by OpenAiProvider (tests). */
   fetch?: FetchLike;
   bedrockClient?: ConverseClient;
   pollyClient?: SynthesizeClient;
@@ -46,12 +46,15 @@ export function createLlm(cfg: ProvidersEnv, o: ProviderOverrides = {}): LlmProv
       ...(o.bedrockClient !== undefined ? { client: o.bedrockClient } : {}),
     });
   }
-  if (cfg.STANDIN_LLM === 'localllm') {
-    return new LocalLlmProvider({
-      baseUrl: cfg.LOCAL_LLM_BASE_URL,
-      model: cfg.LOCAL_LLM_MODEL,
-      timeoutMs: cfg.LOCAL_LLM_TIMEOUT_MS,
-      reasoningEffort: cfg.LOCAL_LLM_REASONING_EFFORT,
+  if (cfg.STANDIN_LLM === 'openai') {
+    // superRefine guarantees key and model are set when STANDIN_LLM=openai (offline only).
+    const effort = cfg.OPENAI_REASONING_EFFORT;
+    return new OpenAiProvider({
+      baseUrl: cfg.OPENAI_BASE_URL,
+      model: cfg.OPENAI_MODEL ?? '',
+      apiKey: cfg.OPENAI_API_KEY ?? '',
+      timeoutMs: cfg.OPENAI_TIMEOUT_MS,
+      ...(effort !== 'off' ? { openaiReasoningEffort: effort } : {}),
       ...(o.fetch !== undefined ? { fetch: o.fetch } : {}),
     });
   }

@@ -3,7 +3,7 @@
  *
  * In the hosted judge demo (DEMO_EMBED_TOKEN=true) anyone can read the Bearer
  * token from /sim/config, so /sim/api/llm and /sim/api/tts are effectively
- * public. When they reach a real model (Bedrock / LocalLlm) or Polly, each
+ * public. When they reach a real model (Bedrock / OpenAI) or Polly, each
  * request is bounded (history, tools, output tokens) and metered by a strict
  * per-IP bucket plus global hourly and daily (UTC day) budgets. Over a limit,
  * the LLM endpoint degrades to the scripted matcher and TTS to browser speech,

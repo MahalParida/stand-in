@@ -21,7 +21,7 @@ When a refund is stuck or the broadband is dead, you lose an hour pressing 1, wa
 5. **Dial allowlist.** Stand-In only dials numbers from its vetted `business-directory.json`. Never a number supplied by the callee, an SMS, an email, or the LLM. (Anti-scam.)  
 6. **Honest AI.** Every call opens with: *"Hi, I'm an AI assistant calling on behalf of {name}. This call is being transcribed for them."*  
 7. **Never call a real company in the demo.** The demo business is our own fake "BharatNet Broadband".  
-8. **Runs offline & in cloud.** `pnpm demo` must work with no AWS keys (local LLM via LocalLlm or scripted policy + browser TTS). AWS is the "production" path, toggled by env (`STANDIN_MODE=offline|aws`), and the `@aws-sdk/client-bedrock-runtime` provider remains wired in code at all times for the AWS Builder Mini-Challenge.  
+8. **Runs offline & in cloud.** `pnpm demo` must work with no AWS keys (scripted policy, or the OpenAI API for local dev/eval, + browser TTS). AWS is the "production" path, toggled by env (`STANDIN_MODE=offline|aws`), and the `@aws-sdk/client-bedrock-runtime` provider remains wired in code at all times for the AWS Builder Mini-Challenge.  
 9. **Deterministic replays.** Every scenario is seeded; `pnpm eval` reruns all golden calls and prints a pass table.
 
 ## 2. System architecture
@@ -29,7 +29,7 @@ When a refund is stuck or the broadband is dead, you lose an hour pressing 1, wa
 ```
 ┌──────────────────────────── apps/alexa-sim (React, Vite) ────────────────────────────┐
 │  "Echo Show" frame · mic (Web Speech STT) · Polly/Browser TTS · live call card        │
-│  Orchestrator: Bedrock Converse tool-use loop (or LocalLlm / scripted fallback)          │
+│  Orchestrator: Bedrock Converse tool-use loop (or OpenAI API / scripted fallback)      │
 │  MCP CLIENT  (initialize → tools/list → tools/call, elicitation handler, MCP Apps)     │
 │  MCP trace panel (every JSON-RPC message + latency)   ·  "Take over call" button       │
 └───────────────────────────────┬────────────────────────────────────────────────────────┘
@@ -68,7 +68,7 @@ When a refund is stuck or the broadband is dead, you lose an hour pressing 1, wa
 | Language / build | TypeScript (strict), Node 22, pnpm workspaces | — |
 | MCP | `@modelcontextprotocol/sdk` (McpServer + StreamableHTTPServerTransport; Client + StreamableHTTPClientTransport), protocol `2025-11-25`; `@modelcontextprotocol/ext-apps` for the card | — |
 | Validation | zod | — |
-| LLM (orchestrator, planner, fake human agent) | Amazon Bedrock Converse API (`@aws-sdk/client-bedrock-runtime`) | LocalLlm on local RTX 5090 (OpenAI-compatible endpoint), then scripted policy |
+| LLM (orchestrator, planner, fake human agent) | Amazon Bedrock Converse API (`@aws-sdk/client-bedrock-runtime`) | OpenAI API (local dev/eval only, never in aws mode), then scripted policy |
 | TTS | Amazon Polly (`en-IN` Kajal neural for Stand-In; a different voice for IVR and the human agent) | Browser `speechSynthesis` |
 | STT (user) | Browser Web Speech API | text box |
 | STT (call, Tier 1 only) | Amazon Transcribe Streaming | — |
@@ -237,7 +237,7 @@ Notifications/structured output: always return rich fields (`ticketId`, `dueBy`,
 
 - Echo-Show-style frame (1280×800), generic look, **no Amazon logos/trademarks**.  
 - Real MCP client; trace panel shows every JSON-RPC message.  
-- Orchestrator: Bedrock Converse with the MCP tools converted to toolSpecs; system prompt = "You are Alexa+ with the Stand-In add-on…". Offline: LocalLlm, then a scripted intent matcher for the demo lines.  
+- Orchestrator: Bedrock Converse with the MCP tools converted to toolSpecs; system prompt = "You are Alexa+ with the Stand-In add-on…". Offline: OpenAI API (local dev/eval), then a scripted intent matcher for the demo lines.  
 - Split view during calls: left = Echo (what the user sees/hears), right = "the phone line" (what the business hears) with distinct TTS voices — this is what makes the video legible.  
 - `?autoplay=happy|otp|followup` runs a scenario hands-free for recording; `Reset take` restores seed state.
 
@@ -264,7 +264,7 @@ Times are IST. Each milestone has a Definition of Done (DoD) that must pass befo
 
 **M1 — Core + disclosure-guard (Thu 08:00–11:00)** Domain types, SQLite repo, hash-chained event log, state machine (pure), guard (tiers, expansion, DLP, inbound classifier). DoD: ≥40 guard tests incl. Luhn, OTP-near-keyword, Aadhaar, digit-spaced variants ("four two one…"); state machine transition tests; hash-chain verify test.
 
-**M2 — Fake business + SimCarrier + call agent (Thu 11:00–16:00)** IVR tree, hold, scripted Ravi, SimCarrier, CallSession, planner with scripted provider, then Bedrock/LocalLlm provider. DoD: `pnpm eval` passes S1, S2, S3, S5, S7, S8 deterministically from CLI.
+**M2 — Fake business + SimCarrier + call agent (Thu 11:00–16:00)** IVR tree, hold, scripted Ravi, SimCarrier, CallSession, planner with scripted provider, then Bedrock/OpenAI provider. DoD: `pnpm eval` passes S1, S2, S3, S5, S7, S8 deterministically from CLI.
 
 **M3 — MCP server (Thu 16:00–20:00)** All tools/resources, elicitation + `pendingQuestion` polling flow, OAuth 2.1 discovery endpoints + 401 without `WWW-Authenticate` + Origin check, notifications, call-card MCP App. DoD: MCP round-trip tests over real Streamable HTTP (initialize → tools/list → open_case → place_call → poll to ENDED); MCP Inspector CLI lists tools; S4 passes.
 
@@ -331,7 +331,7 @@ Times are IST. Each milestone has a Definition of Done (DoD) that must pass befo
 | US judges test during PST hours (nighttime IST) | `place_call` defaults to `simulatedHourIst: 14` unless `S7` passes `23` |
 | Hosted endpoint goes down before Nov 20 judging | M6 deploys stateless/SQLite `SimCarrier` host to Lambda Function URL / Render / Fly.io before any stretch work |
 | Real telephony eats the timeline | SimCarrier is default; Twilio is a 2.25 h time-box with hard go/no-go |
-| Bedrock latency/quotas | streaming off, small model for planner, scripted + LocalLlm fallbacks |
+| Bedrock latency/quotas | streaming off, small model for planner, scripted + OpenAI API (local dev/eval) fallbacks |
 | LLM says something unsafe | code-enforced guard; eval scenarios S2/S3/S8 |
 | Judges think "Gemini already does this" | position: Alexa+ doesn't; Google's is Pixel 11 / US / paid beta; Stand-In adds disclosure policy, hand-off on a shared home device, and promise follow-up |
 | Ethics of AI calling humans | upfront AI disclosure, transcription notice, opt-out list in directory |

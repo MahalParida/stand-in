@@ -44,7 +44,7 @@ import { LocalScheduler, createSqliteRepo } from '@standin/providers';
 import type { BusinessSpec, PolicyAttempt, Scenario } from './scenarios.js';
 import { seedOverrides, seedVariation, type SeedVariation } from './seeds.js';
 
-export type LlmMode = 'scripted' | 'localllm' | 'bedrock' | 'openai';
+export type LlmMode = 'scripted' | 'openai' | 'bedrock';
 
 /** Records every request sent to an LLM (for the never-tier leak check). */
 export class RecordingLlm implements LlmProvider {
@@ -110,7 +110,7 @@ export interface ScenarioRun {
 export interface RunOptions {
   seed: number;
   llm: LlmMode;
-  /** Provider for localllm/bedrock modes (already constructed). */
+  /** Provider for openai/bedrock modes (already constructed). */
   llmProvider?: LlmProvider;
 }
 
@@ -142,7 +142,7 @@ function makePlanner(sc: Scenario, opts: RunOptions, recorder: { llm?: Recording
   const rec = new RecordingLlm(base);
   recorder.llm = rec;
   const llm = sc.planner.garbage === undefined ? rec : new GarbageInjectingLlm(rec, sc.planner.garbage);
-  // A real model samples with the seed's temperature and seed (LocalLlm honours `seed`).
+  // A real model samples with the seed's temperature and seed (OpenAI honours `seed`).
   if (opts.llm === 'scripted') return new LlmPlanner(llm);
   const v = seedVariation(opts.seed);
   return new LlmPlanner(llm, { temperature: v.temperature, seed: opts.seed });

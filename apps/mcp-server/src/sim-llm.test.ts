@@ -253,7 +253,7 @@ describe('scripted matcher (pure)', () => {
   });
 });
 
-describe('LLM-backed orchestrator (LocalLlm / Bedrock path)', () => {
+describe('LLM-backed orchestrator (OpenAI / Bedrock path)', () => {
   const ctx = { now: new Date('2026-10-22T08:30:00Z'), businesses: [{ name: 'BharatNet Broadband', aliases: [] }] };
   const tools: LlmToolSpec[] = [{ name: 'open_case', description: 'Open a case', inputSchema: { type: 'object' } }];
   const never = [{ key: 'otp', label: 'OTP', value: '482913', tier: 'never' as const, approved: false, source: 'user' as const }];

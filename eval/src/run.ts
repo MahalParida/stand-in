@@ -2,8 +2,8 @@
  * `pnpm eval` — runs every golden scenario (data/scenarios) deterministically
  * and prints a pass/fail table with per-check details.
  *
- *   --llm scripted|localllm|bedrock|openai   planner backend (default scripted: no LLM, deterministic);
- *                                   openai is an eval-only fast path (OPENAI_API_KEY, OPENAI_MODEL)
+ *   --llm scripted|openai|bedrock   planner backend (default scripted: no LLM, deterministic);
+ *                                   openai reads OPENAI_* from the repo .env (OPENAI_API_KEY, OPENAI_MODEL)
  *   --seeds N                       run each scenario with seeds 1..N (default 1); see seeds.ts
  *                                   for what a seed changes (wording, hold, ticket, temperature/seed)
  *   --scenario ID                   run only this scenario (e.g. S2); repeatable / comma-separated
@@ -14,7 +14,7 @@
  *    run may leak a never-tier value or crash, whatever the score.
  */
 import type { LlmProvider } from '@standin/core';
-import { LocalLlmProvider, ProvidersConfigError, createLlm, parseProvidersEnv } from '@standin/providers';
+import { ProvidersConfigError, createLlm, parseProvidersEnv } from '@standin/providers';
 import { z } from 'zod';
 import { runChecks, type CheckResult } from './checks.js';
 import { runScenario, type LlmMode } from './runner.js';
@@ -22,7 +22,7 @@ import { loadScenarios, type Scenario } from './scenarios.js';
 import { describeVariation, seedVariation } from './seeds.js';
 
 const ArgsSchema = z.object({
-  llm: z.enum(['scripted', 'localllm', 'bedrock', 'openai']).default('scripted'),
+  llm: z.enum(['scripted', 'openai', 'bedrock']).default('scripted'),
   seeds: z.coerce.number().int().min(1).max(50).default(1),
   scenario: z.array(z.string().regex(/^S\d+$/i)).default([]),
   verbose: z.boolean().default(false),
@@ -66,14 +66,6 @@ function parseArgs(argv: readonly string[]): Args {
   return ArgsSchema.parse(raw);
 }
 
-const OpenAiEnvSchema = z.object({
-  OPENAI_API_KEY: z.string().min(1),
-  OPENAI_MODEL: z.string().min(1),
-  OPENAI_BASE_URL: z.url().default('https://api.openai.com/v1'),
-  /** For reasoning models (gpt-5 family); 'off' for non-reasoning models that accept temperature. */
-  OPENAI_REASONING_EFFORT: z.enum(['off', 'minimal', 'low', 'medium', 'high']).default('minimal'),
-});
-
 function makeLlm(mode: LlmMode): LlmProvider | undefined {
   if (mode === 'scripted') return undefined;
   if (mode === 'openai') {
@@ -83,23 +75,9 @@ function makeLlm(mode: LlmMode): LlmProvider | undefined {
     } catch {
       // no .env: rely on the shell environment
     }
-    const env = OpenAiEnvSchema.safeParse(process.env);
-    if (!env.success) {
-      throw new ProvidersConfigError(env.error.issues.map((i) => String(i.path[0])));
-    }
-    return new LocalLlmProvider({
-      dialect: 'openai',
-      baseUrl: env.data.OPENAI_BASE_URL,
-      model: env.data.OPENAI_MODEL,
-      apiKey: env.data.OPENAI_API_KEY,
-      ...(env.data.OPENAI_REASONING_EFFORT !== 'off' ? { openaiReasoningEffort: env.data.OPENAI_REASONING_EFFORT } : {}),
-    });
+    return createLlm(parseProvidersEnv({ ...process.env, STANDIN_MODE: 'offline', STANDIN_LLM: 'openai' }));
   }
-  const env =
-    mode === 'localllm'
-      ? { ...process.env, STANDIN_MODE: 'offline', STANDIN_LLM: 'localllm' }
-      : { ...process.env, STANDIN_MODE: 'aws' };
-  return createLlm(parseProvidersEnv(env));
+  return createLlm(parseProvidersEnv({ ...process.env, STANDIN_MODE: 'aws' }));
 }
 
 interface Row {
@@ -119,7 +97,7 @@ async function main(): Promise<number> {
     args = parseArgs(process.argv.slice(2));
   } catch (err) {
     console.error(`eval: ${err instanceof Error ? err.message : String(err)}`);
-    console.error('usage: pnpm eval [--llm scripted|localllm|bedrock|openai] [--seeds N] [--scenario S1,S2] [--verbose]');
+    console.error('usage: pnpm eval [--llm scripted|openai|bedrock] [--seeds N] [--scenario S1,S2] [--verbose]');
     return 2;
   }
 

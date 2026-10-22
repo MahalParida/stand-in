@@ -4,7 +4,7 @@ import {
   BedrockProvider,
   BrowserTts,
   DynamoRepo,
-  LocalLlmProvider,
+  OpenAiProvider,
   PACKAGE_NAME,
   PollyTts,
   ProvidersConfigError,
@@ -34,18 +34,31 @@ describe('parseProvidersEnv', () => {
       STANDIN_LLM: 'scripted',
       STANDIN_REPO: 'sqlite',
       SQLITE_PATH: ':memory:',
-      LOCAL_LLM_BASE_URL: 'http://localhost:11434/v1',
-      LOCAL_LLM_MODEL: 'local-model',
+      OPENAI_BASE_URL: 'https://api.openai.com/v1',
+      OPENAI_REASONING_EFFORT: 'off',
       POLLY_VOICE: 'Kajal',
     });
     expect(c.AWS_REGION).toBeUndefined();
+    expect(c.OPENAI_API_KEY).toBeUndefined();
+    expect(c.OPENAI_MODEL).toBeUndefined();
   });
 
   it('treats empty strings (KEY= in .env) as unset', () => {
-    const c = parseProvidersEnv({ STANDIN_MODE: '', BEDROCK_MODEL_ID: '', AWS_PROFILE: '', LOCAL_LLM_MODEL: ' ' });
+    const c = parseProvidersEnv({
+      STANDIN_MODE: '',
+      BEDROCK_MODEL_ID: '',
+      AWS_PROFILE: '',
+      OPENAI_API_KEY: '',
+      OPENAI_MODEL: ' ',
+      OPENAI_BASE_URL: '',
+      OPENAI_REASONING_EFFORT: '',
+    });
     expect(c.STANDIN_MODE).toBe('offline');
     expect(c.BEDROCK_MODEL_ID).toBeUndefined();
-    expect(c.LOCAL_LLM_MODEL).toBe('local-model');
+    expect(c.OPENAI_API_KEY).toBeUndefined();
+    expect(c.OPENAI_MODEL).toBeUndefined();
+    expect(c.OPENAI_BASE_URL).toBe('https://api.openai.com/v1');
+    expect(c.OPENAI_REASONING_EFFORT).toBe('off');
   });
 
   it('aws mode requires AWS_REGION and BEDROCK_MODEL_ID', () => {
@@ -69,9 +82,29 @@ describe('parseProvidersEnv', () => {
     }
   });
 
-  it('rejects unknown Polly voices and bad LocalLlm URLs', () => {
+  it('rejects unknown Polly voices and bad OpenAI URLs', () => {
     expect(() => parseProvidersEnv({ POLLY_VOICE: 'Nobody' })).toThrow(ProvidersConfigError);
-    expect(() => parseProvidersEnv({ LOCAL_LLM_BASE_URL: 'nope' })).toThrow(ProvidersConfigError);
+    expect(() => parseProvidersEnv({ OPENAI_BASE_URL: 'nope' })).toThrow(ProvidersConfigError);
+    expect(() => parseProvidersEnv({ STANDIN_LLM: 'local-model' })).toThrow(ProvidersConfigError);
+    expect(() => parseProvidersEnv({ OPENAI_REASONING_EFFORT: 'none' })).toThrow(ProvidersConfigError);
+  });
+
+  it('STANDIN_LLM=openai requires OPENAI_API_KEY and OPENAI_MODEL, naming them without values', () => {
+    try {
+      parseProvidersEnv({ STANDIN_LLM: 'openai', OPENAI_API_KEY: '' });
+      expect.unreachable();
+    } catch (e) {
+      expect(e).toBeInstanceOf(ProvidersConfigError);
+      expect((e as ProvidersConfigError).variables.sort()).toEqual(['OPENAI_API_KEY', 'OPENAI_MODEL']);
+    }
+    const key = 'sk-not-a-real-secret-value';
+    try {
+      parseProvidersEnv({ STANDIN_LLM: 'openai', OPENAI_API_KEY: key });
+      expect.unreachable();
+    } catch (e) {
+      expect((e as ProvidersConfigError).variables).toEqual(['OPENAI_MODEL']);
+      expect(String(e)).not.toContain(key);
+    }
   });
 });
 
@@ -90,21 +123,73 @@ describe('createProviders', () => {
     p.close();
   });
 
-  it('offline + STANDIN_LLM=localllm uses LocalLlm with env config', async () => {
+  it('offline + STANDIN_LLM=openai uses OpenAI with env config', async () => {
     let url = '';
+    let auth = '';
+    let body: Record<string, unknown> = {};
     const p = createProviders(
-      { STANDIN_LLM: 'localllm', LOCAL_LLM_BASE_URL: 'http://127.0.0.1:9999/v1', LOCAL_LLM_MODEL: 'm' },
       {
-        fetch: async (u) => {
+        STANDIN_LLM: 'openai',
+        OPENAI_API_KEY: 'sk-test',
+        OPENAI_MODEL: 'm',
+        OPENAI_BASE_URL: 'http://127.0.0.1:9999/v1',
+        OPENAI_REASONING_EFFORT: 'low',
+      },
+      {
+        fetch: async (u, init) => {
           url = u;
+          auth = (init.headers as Record<string, string>).authorization ?? '';
+          body = JSON.parse(String(init.body)) as Record<string, unknown>;
           return new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }));
         },
       },
     );
-    expect(p.llm).toBeInstanceOf(LocalLlmProvider);
+    expect(p.llm).toBeInstanceOf(OpenAiProvider);
+    expect(p.llm.name).toBe('openai');
     expect(await p.llm.chat({ messages: [{ role: 'user', content: 'x' }] })).toBe('ok');
     expect(url).toBe('http://127.0.0.1:9999/v1/chat/completions');
+    expect(auth).toBe('Bearer sk-test');
+    expect(body).toMatchObject({ model: 'm', reasoning_effort: 'low' });
     p.close();
+  });
+
+  it('OPENAI_REASONING_EFFORT=off sends no reasoning_effort', async () => {
+    let body: Record<string, unknown> = {};
+    const p = createProviders(
+      { STANDIN_LLM: 'openai', OPENAI_API_KEY: 'sk-test', OPENAI_MODEL: 'm' },
+      {
+        fetch: async (_u, init) => {
+          body = JSON.parse(String(init.body)) as Record<string, unknown>;
+          return new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }));
+        },
+      },
+    );
+    await p.llm.chat({ messages: [{ role: 'user', content: 'x' }], temperature: 0.1 });
+    expect(body).not.toHaveProperty('reasoning_effort');
+    expect(body.temperature).toBe(0.1);
+    p.close();
+  });
+
+  it('aws mode always uses Bedrock, even with STANDIN_LLM=openai', () => {
+    const fetchCalls: string[] = [];
+    const p = createProviders(
+      { ...AWS_ENV, STANDIN_LLM: 'openai', OPENAI_API_KEY: 'sk-test', OPENAI_MODEL: 'm' },
+      {
+        bedrockClient: { send: async () => { throw new Error('unused'); } },
+        fetch: async (u) => {
+          fetchCalls.push(u);
+          return new Response('{}');
+        },
+      },
+    );
+    expect(p.llm).toBeInstanceOf(BedrockProvider);
+    expect(p.llm).not.toBeInstanceOf(OpenAiProvider);
+    p.close();
+    // aws mode does not require the OpenAI variables either.
+    const q = createProviders({ ...AWS_ENV, STANDIN_LLM: 'openai' });
+    expect(q.llm).toBeInstanceOf(BedrockProvider);
+    q.close();
+    expect(fetchCalls).toEqual([]);
   });
 
   it('offline accepts a custom script', async () => {

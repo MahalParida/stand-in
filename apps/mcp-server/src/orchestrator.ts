@@ -7,7 +7,7 @@
  *
  * Bedrock: a native Converse tool-use loop (the MCP tools become toolSpecs,
  * tool calls come back as toolUse blocks, results go back as toolResult).
- * LocalLlm (and any text-only provider): the same contract through a JSON
+ * OpenAI (and any text-only provider): the same contract through a JSON
  * tool-call protocol in the prompt.
  * Every message is masked (never-tier values + DLP patterns) before it is
  * sent; bad model output falls back to the scripted matcher.
@@ -433,7 +433,7 @@ export function scriptedOrchestrator(req: SimLlmRequest, ctx: OrchestratorContex
 }
 
 /* ------------------------------------------------------------------ */
-/* LLM-backed orchestrator (LocalLlm / Bedrock)                          */
+/* LLM-backed orchestrator (OpenAI / Bedrock)                          */
 /* ------------------------------------------------------------------ */
 
 const LlmReplySchema = z.object({
