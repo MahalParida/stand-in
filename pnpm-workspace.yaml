@@ -1,0 +1,9 @@
+packages:
+  - packages/*
+  - apps/*
+  - eval
+
+# pnpm 10+ blocks dependency build scripts by default; allow the native ones we rely on.
+allowBuilds:
+  esbuild: true
+  better-sqlite3: true

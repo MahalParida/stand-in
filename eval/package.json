@@ -1,0 +1,14 @@
+{
+  "name": "@standin/eval",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "eval": "tsx src/run.ts"
+  },
+  "dependencies": {
+    "zod": "4.6.7"
+  }
+}

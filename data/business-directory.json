@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "note": "Dial allowlist. Demo-only fictional businesses with deliberately invalid numbers. Never add real numbers.",
+  "businesses": [
+    {
+      "id": "bharatnet-broadband",
+      "name": "BharatNet Broadband",
+      "aliases": ["BharatNet", "Bharat Net"],
+      "category": "isp",
+      "phone": "+91-00000-00001",
+      "carrier": "sim",
+      "timezone": "Asia/Kolkata",
+      "callingHours": { "start": "09:00", "end": "20:00" },
+      "dailyCallCap": 5,
+      "optOut": false,
+      "fictional": true
+    }
+  ]
+}

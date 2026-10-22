@@ -1,0 +1,28 @@
+{
+  "name": "stand-in",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@12.6.0",
+  "scripts": {
+    "build": "pnpm -r build",
+    "test": "vitest run",
+    "lint": "eslint .",
+    "eval": "pnpm --filter @standin/eval run eval",
+    "demo": "node -e \"console.log('stand-in demo: not implemented yet (arrives in M4)')\""
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "24.19.2",
+    "eslint": "10.13.0",
+    "globals": "17.13.0",
+    "tsx": "4.23.15",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.72.0",
+    "vitest": "5.0.5"
+  }
+}
