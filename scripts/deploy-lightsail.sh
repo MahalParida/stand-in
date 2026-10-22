@@ -16,6 +16,13 @@
 # infra/iam-standin-runtime-policy.json) through RUNTIME_AWS_*; those values
 # only ever go into the deployment's container environment.
 #
+# Alexa+ account linking (optional): OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET,
+# OAUTH_REDIRECT_URIS, OAUTH_LINK_PASSCODE, OAUTH_SCOPES, OAUTH_CLIENT_CREDENTIALS
+# and MCP_PUBLIC_DISCOVERY are read from the shell environment, else from .env.
+# PUBLIC_BASE_URL is set to the service URL (override with
+# LIGHTSAIL_PUBLIC_BASE_URL, e.g. for a custom domain); it must equal the base
+# of the MCP endpoint in the add-on's addon.json.
+#
 # STANDIN_TOKEN is read from the local .env at deploy time. No secret value is
 # ever echoed: the deployment JSON lives in a 0600 temp file that is removed on
 # exit, and AWS responses are filtered with --query so they never print it.
@@ -104,6 +111,37 @@ STANDIN_TOKEN_VALUE="$(dotenv_get STANDIN_TOKEN)"
 [[ -n "$STANDIN_TOKEN_VALUE" ]] || die "STANDIN_TOKEN is not set in $ENV_FILE"
 [[ "${#STANDIN_TOKEN_VALUE}" -ge 24 ]] || die "STANDIN_TOKEN in .env must be at least 24 characters for the hosted demo"
 [[ "$STANDIN_TOKEN_VALUE" != change-me* ]] || die "STANDIN_TOKEN in .env is still the .env.example placeholder"
+
+# Alexa+ account linking (all optional; secrets never echoed).
+OAUTH_CLIENT_ID="${OAUTH_CLIENT_ID:-$(dotenv_get OAUTH_CLIENT_ID)}"
+OAUTH_CLIENT_SECRET_VALUE="${OAUTH_CLIENT_SECRET:-$(dotenv_get OAUTH_CLIENT_SECRET)}"
+OAUTH_REDIRECT_URIS="${OAUTH_REDIRECT_URIS:-$(dotenv_get OAUTH_REDIRECT_URIS)}"
+OAUTH_LINK_PASSCODE_VALUE="${OAUTH_LINK_PASSCODE:-$(dotenv_get OAUTH_LINK_PASSCODE)}"
+OAUTH_SCOPES="${OAUTH_SCOPES:-$(dotenv_get OAUTH_SCOPES)}"
+OAUTH_CLIENT_CREDENTIALS="${OAUTH_CLIENT_CREDENTIALS:-$(dotenv_get OAUTH_CLIENT_CREDENTIALS)}"
+MCP_PUBLIC_DISCOVERY="${MCP_PUBLIC_DISCOVERY:-$(dotenv_get MCP_PUBLIC_DISCOVERY)}"
+STANDIN_CONTACT="${STANDIN_CONTACT:-$(dotenv_get STANDIN_CONTACT)}"
+if [[ -n "$OAUTH_CLIENT_ID" ]]; then
+  [[ "$OAUTH_CLIENT_ID" =~ ^[[:graph:]]{1,200}$ ]] || die "OAUTH_CLIENT_ID must be 1-200 printable characters without spaces"
+  # The hosted server is public: a confidential client and a consent passcode are mandatory
+  # (otherwise anyone who knows the client id could approve and redeem their own code).
+  [[ -n "$OAUTH_CLIENT_SECRET_VALUE" ]] || die "OAUTH_CLIENT_SECRET is required when OAUTH_CLIENT_ID is set (see alexa-addon/README.md)"
+  [[ "${#OAUTH_CLIENT_SECRET_VALUE}" -ge 24 ]] || die "OAUTH_CLIENT_SECRET must be at least 24 characters for the hosted demo"
+  [[ -n "$OAUTH_LINK_PASSCODE_VALUE" ]] || die "OAUTH_LINK_PASSCODE is required when OAUTH_CLIENT_ID is set (see alexa-addon/README.md)"
+  [[ "${#OAUTH_LINK_PASSCODE_VALUE}" -ge 8 ]] || die "OAUTH_LINK_PASSCODE must be at least 8 characters"
+  [[ -n "$OAUTH_REDIRECT_URIS" ]] || log "warning: OAUTH_REDIRECT_URIS is empty; linking fails until Alexa's redirect URIs are added and you redeploy"
+  # Alexa+ lists tools at `alexa-ai deploy`, before anyone has linked: default to both discovery paths.
+  OAUTH_CLIENT_CREDENTIALS="${OAUTH_CLIENT_CREDENTIALS:-true}"
+  MCP_PUBLIC_DISCOVERY="${MCP_PUBLIC_DISCOVERY:-true}"
+  if [[ "$OAUTH_CLIENT_CREDENTIALS" != true && "$MCP_PUBLIC_DISCOVERY" != true ]]; then
+    log "warning: OAUTH_CLIENT_CREDENTIALS and MCP_PUBLIC_DISCOVERY are both false; Alexa+ cannot list tools before linking"
+  fi
+else
+  [[ -z "$OAUTH_CLIENT_SECRET_VALUE" && -z "$OAUTH_REDIRECT_URIS" ]] || die "OAUTH_CLIENT_SECRET / OAUTH_REDIRECT_URIS are set but OAUTH_CLIENT_ID is not"
+fi
+for n in OAUTH_CLIENT_CREDENTIALS MCP_PUBLIC_DISCOVERY; do
+  [[ -z "${!n}" || "${!n}" =~ ^(true|false)$ ]] || die "$n must be true or false"
+done
 
 RUNTIME_AWS_ACCESS_KEY_ID="${RUNTIME_AWS_ACCESS_KEY_ID:-}"
 RUNTIME_AWS_SECRET_ACCESS_KEY="${RUNTIME_AWS_SECRET_ACCESS_KEY:-}"
@@ -195,6 +233,9 @@ else
   [[ "$SERVICE_URL" == https://* ]] || die "could not read the service URL"
 fi
 SERVICE_URL="${SERVICE_URL%/}"
+PUBLIC_URL="${LIGHTSAIL_PUBLIC_BASE_URL:-$SERVICE_URL}"
+PUBLIC_URL="${PUBLIC_URL%/}"
+[[ "$PUBLIC_URL" == https://* ]] || die "LIGHTSAIL_PUBLIC_BASE_URL must be an https URL"
 
 # ---------------------------------------------------------------------------
 # Push image
@@ -229,8 +270,11 @@ DEPLOY_REDACT="$DRY_RUN" \
   C_SIM_TTS_HOURLY_CHAR_CAP="$SIM_TTS_HOURLY_CHAR_CAP" C_SIM_TTS_DAILY_CHAR_CAP="$SIM_TTS_DAILY_CHAR_CAP" \
   C_MAX_SESSIONS="$MAX_SESSIONS" C_MAX_SESSIONS_PER_IP="$MAX_SESSIONS_PER_IP" \
   C_STANDIN_DAILY_CALL_CAP="$STANDIN_DAILY_CALL_CAP" C_MAX_CALL_MINUTES="$MAX_CALL_MINUTES" \
-  C_ALLOWED_HOSTS="$STANDIN_ALLOWED_HOSTS" \
+  C_ALLOWED_HOSTS="$STANDIN_ALLOWED_HOSTS" C_PUBLIC_URL="$PUBLIC_URL" \
+  C_OAUTH_CLIENT_ID="$OAUTH_CLIENT_ID" C_OAUTH_REDIRECT_URIS="$OAUTH_REDIRECT_URIS" C_OAUTH_SCOPES="$OAUTH_SCOPES" \
+  C_OAUTH_CLIENT_CREDENTIALS="$OAUTH_CLIENT_CREDENTIALS" C_MCP_PUBLIC_DISCOVERY="$MCP_PUBLIC_DISCOVERY" C_CONTACT="$STANDIN_CONTACT" \
   S_TOKEN="$STANDIN_TOKEN_VALUE" S_KEY_ID="$RUNTIME_AWS_ACCESS_KEY_ID" S_SECRET="$RUNTIME_AWS_SECRET_ACCESS_KEY" \
+  S_OAUTH_SECRET="$OAUTH_CLIENT_SECRET_VALUE" S_OAUTH_PASSCODE="$OAUTH_LINK_PASSCODE_VALUE" \
   node --input-type=module - "$CONTAINERS_JSON" "$ENDPOINT_JSON" <<'NODE'
 import { writeFileSync } from 'node:fs';
 const [containersPath, endpointPath] = process.argv.slice(2);
@@ -246,7 +290,7 @@ const environment = {
   TRUST_PROXY: 'true',
   TRUST_PROXY_HOPS: '1',
   STANDIN_ALLOWED_ORIGINS: e.C_URL,
-  PUBLIC_BASE_URL: e.C_URL,
+  PUBLIC_BASE_URL: e.C_PUBLIC_URL,
   AWS_REGION: e.C_APP_REGION,
   BEDROCK_MODEL_ID: e.C_MODEL,
   POLLY_VOICE: e.C_VOICE,
@@ -272,6 +316,20 @@ const environment = {
   AWS_SECRET_ACCESS_KEY: secret(e.S_SECRET),
 };
 if ((e.C_ALLOWED_HOSTS ?? '') !== '') environment.STANDIN_ALLOWED_HOSTS = e.C_ALLOWED_HOSTS;
+// Alexa+ account linking: only the variables that are set.
+const optional = {
+  OAUTH_CLIENT_ID: e.C_OAUTH_CLIENT_ID,
+  OAUTH_REDIRECT_URIS: e.C_OAUTH_REDIRECT_URIS,
+  OAUTH_SCOPES: e.C_OAUTH_SCOPES,
+  OAUTH_CLIENT_CREDENTIALS: e.C_OAUTH_CLIENT_CREDENTIALS,
+  MCP_PUBLIC_DISCOVERY: e.C_MCP_PUBLIC_DISCOVERY,
+  STANDIN_CONTACT: e.C_CONTACT,
+};
+for (const [k, v] of Object.entries(optional)) if ((v ?? '') !== '') environment[k] = v;
+if ((e.C_OAUTH_CLIENT_ID ?? '') !== '') {
+  if ((e.S_OAUTH_SECRET ?? '') !== '') environment.OAUTH_CLIENT_SECRET = secret(e.S_OAUTH_SECRET);
+  if ((e.S_OAUTH_PASSCODE ?? '') !== '') environment.OAUTH_LINK_PASSCODE = secret(e.S_OAUTH_PASSCODE);
+}
 for (const [k, v] of Object.entries(environment)) {
   if (typeof v !== 'string' || v.length === 0) throw new Error(`deployment env ${k} is empty`);
 }
@@ -332,4 +390,8 @@ done
 
 log "deployment $VERSION is ACTIVE"
 log "smoke test: scripts/smoke-live.sh $SERVICE_URL"
+if [[ -n "$OAUTH_CLIENT_ID" ]]; then
+  log "account linking: issuer $PUBLIC_URL; render the add-on with: node scripts/render-addon.mjs --base-url $PUBLIC_URL --verify"
+  log "note: the container disk is ephemeral, so a redeploy clears issued tokens and Alexa users must link again"
+fi
 printf '%s\n' "$SERVICE_URL"

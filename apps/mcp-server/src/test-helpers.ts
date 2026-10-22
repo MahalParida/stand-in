@@ -27,6 +27,8 @@ export interface StartOptions {
   providers?: (p: Providers) => Providers;
   /** Wall clock (ms) for the daily budgets. */
   now?: () => number;
+  /** Wall clock (ms) for OAuth code/token expiry. */
+  oauthNow?: () => number;
 }
 
 export async function startServer(envOver: Record<string, string> = {}, opts: StartOptions = {}): Promise<Started> {
@@ -49,6 +51,7 @@ export async function startServer(envOver: Record<string, string> = {}, opts: St
     providers,
     staticDir: opts.staticDir ?? join(mkdtempSync(join(tmpdir(), 'standin-static-')), 'missing'),
     ...(opts.now !== undefined ? { now: opts.now } : {}),
+    ...(opts.oauthNow !== undefined ? { oauthNow: opts.oauthNow } : {}),
   });
   const { url } = await server.listen(0, '127.0.0.1');
   return {

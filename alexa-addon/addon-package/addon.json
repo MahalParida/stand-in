@@ -1,0 +1,63 @@
+{
+  "manifestVersion": "1.0",
+  "storeListing": {
+    "distributionCountries": ["US"],
+    "locales": {
+      "en-US": {
+        "default": "DEFAULT",
+        "name": {
+          "value": "Stand-In"
+        },
+        "shortDescription": "Stand-In waits on hold and talks to customer support for you, then tells you the ticket number and what was promised.",
+        "fullDescription": "Stand-In makes support calls for you. Tell Alexa what went wrong and what you want, for example a refund for a broadband outage. Stand-In opens a case, calls the business, navigates the phone menu, waits on hold and explains your problem. If the agent asks for something only you should say, like a one-time password, Stand-In asks you to join the call instead of reading it out. When the call ends you hear the ticket number, what the business promised and by when, and Stand-In can schedule a follow-up call if the promise is missed. You can ask about any case later (\"What happened with my broadband complaint?\") or delete it. This is a hackathon demo: every call is simulated against a fictional business (BharatNet Broadband), and Stand-In never dials real phone numbers. Sensitive values are masked, and cases are deleted automatically after 30 days.",
+        "examplePhrases": [
+          "Ask Stand-In to call BharatNet about my broadband outage",
+          "Ask Stand-In to get me a refund for the days my internet was down",
+          "Ask Stand-In what happened with my broadband complaint",
+          "Ask Stand-In to follow up if BharatNet misses the promised date"
+        ],
+        "privacyAndCompliance": {
+          "privacyPolicyUrl": "${PUBLIC_BASE_URL}/privacy",
+          "termsOfUseUrl": "${PUBLIC_BASE_URL}/terms"
+        },
+        "mediaAssets": {
+          "icons": {
+            "light": [
+              { "size": "72x72", "uri": "${PUBLIC_BASE_URL}/addon-assets/icon-72x72.png" },
+              { "size": "64x64", "uri": "${PUBLIC_BASE_URL}/addon-assets/icon-64x64.png" },
+              { "size": "88x88", "uri": "${PUBLIC_BASE_URL}/addon-assets/icon-88x88.png" },
+              { "size": "126x126", "uri": "${PUBLIC_BASE_URL}/addon-assets/icon-126x126.png" },
+              { "size": "180x180", "uri": "${PUBLIC_BASE_URL}/addon-assets/icon-180x180.png" },
+              { "size": "241x241", "uri": "${PUBLIC_BASE_URL}/addon-assets/icon-241x241.png" }
+            ],
+            "dark": []
+          },
+          "carouselImages": [
+            {
+              "uri": "${PUBLIC_BASE_URL}/addon-assets/carousel-600x900.png",
+              "altText": "The Stand-In shield and phone handset logo above the words Stand-In, holds the line for you",
+              "size": "600x900"
+            }
+          ],
+          "bannerImages": []
+        }
+      }
+    }
+  },
+  "accountLinking": {
+    "enabled": true
+  },
+  "integrations": [
+    {
+      "type": "MCP",
+      "config": {
+        "endpoints": {
+          "default": {
+            "type": "HTTPS",
+            "uri": "${PUBLIC_BASE_URL}/mcp"
+          }
+        }
+      }
+    }
+  ]
+}

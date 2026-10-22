@@ -30,15 +30,17 @@ pass() { printf 'PASS  %s\n' "$*"; }
 fail() { printf 'FAIL  %s\n' "$*"; fails=$((fails + 1)); }
 
 INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"smoke","version":"0"}}}'
+# A tools/call is refused without a token even when MCP_PUBLIC_DISCOVERY lets initialize/tools/list through.
+CALL='{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_cases","arguments":{}}}'
 
 # 1. /health
 code="$(curl -sS -o "$WORK/health" -w '%{http_code}' --max-time 15 "$URL/health" || true)"
 if [[ "$code" == "200" ]]; then pass "/health 200"; else fail "/health returned $code"; fi
 
-# 2. POST /mcp without a token: 401 and no WWW-Authenticate
+# 2. POST /mcp tools/call without a token: 401 and no WWW-Authenticate
 code="$(curl -sS -o /dev/null -D "$WORK/h401" -w '%{http_code}' --max-time 15 -X POST "$URL/mcp" \
-  -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' --data "$INIT" || true)"
-if [[ "$code" == "401" ]]; then pass "/mcp without token 401"; else fail "/mcp without token returned $code"; fi
+  -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' --data "$CALL" || true)"
+if [[ "$code" == "401" ]]; then pass "/mcp tools/call without token 401"; else fail "/mcp tools/call without token returned $code"; fi
 if grep -qi '^www-authenticate:' "$WORK/h401"; then fail "401 carries a WWW-Authenticate header"; else pass "401 has no WWW-Authenticate"; fi
 
 # 3. Foreign Origin: 403 (checked before auth)

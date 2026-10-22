@@ -115,6 +115,67 @@ export const ServerEnvSchema = z.object({
   /** Max sim call duration (spec 4: 25 min). */
   MAX_CALL_MINUTES: opt(z.coerce.number().positive().max(240).default(25)),
   POLLY_VOICE_ALEXA: opt(z.string().min(1).default('Joanna')),
+
+  /* ---------------- OAuth 2.1 account linking (Alexa+ add-on) ---------------- */
+  /**
+   * Pre-registered OAuth client (no dynamic registration). Setting it enables
+   * /authorize and /token. The value is what you give `alexa-ai
+   * configure-account-linking --client-id`.
+   */
+  OAUTH_CLIENT_ID: opt(
+    z
+      .string()
+      .min(1)
+      .max(200)
+      .regex(/^[\x21-\x7e]+$/, 'OAUTH_CLIENT_ID must be printable ASCII without spaces')
+      .optional(),
+  ),
+  /**
+   * Client secret (never logged). Set: a confidential client authenticated with
+   * client_secret_basic or client_secret_post. Unset: a public PKCE-only client
+   * (Amazon describes the secret as optional); allowed only on a loopback-only
+   * dev server, required when the server is reachable from other machines.
+   */
+  OAUTH_CLIENT_SECRET: opt(z.string().min(16, 'OAUTH_CLIENT_SECRET must be at least 16 characters').max(512).optional()),
+  /** Exact-match allowlist of redirect URIs (comma list). Alexa shows its list after configure-account-linking. */
+  OAUTH_REDIRECT_URIS: csv,
+  /** Scopes advertised in scopes_supported (space or comma list). Alexa requests these during linking. */
+  OAUTH_SCOPES: opt(
+    z
+      .string()
+      .default('standin')
+      .transform((s) => [...new Set(s.split(/[\s,]+/).filter((x) => x.length > 0))])
+      .pipe(z.array(z.string().regex(/^[\x21\x23-\x5b\x5d-\x7e]+$/)).min(1)),
+  ),
+  /**
+   * Passcode the consent page asks for, so strangers cannot link the hosted
+   * demo. Required whenever the server is reachable beyond loopback. At least
+   * 8 characters; wrong guesses are also capped per IP and globally (oauth.ts).
+   */
+  OAUTH_LINK_PASSCODE: opt(z.string().min(8, 'OAUTH_LINK_PASSCODE must be at least 8 characters').max(200).optional()),
+  /**
+   * Wrong passcodes allowed per rolling hour across all linking requests. Once
+   * spent, approvals are refused until the window clears (even with the right
+   * passcode). Per client IP the budget is a third of this (at least 1).
+   */
+  OAUTH_PASSCODE_MAX_FAILURES: opt(z.coerce.number().int().min(1).max(1000).default(20)),
+  OAUTH_ACCESS_TTL_SEC: opt(z.coerce.number().int().min(30).max(86_400).default(3600)),
+  OAUTH_REFRESH_TTL_DAYS: opt(z.coerce.number().int().min(1).max(365).default(30)),
+  OAUTH_CODE_TTL_SEC: opt(z.coerce.number().int().min(5).max(600).default(60)),
+  /**
+   * Tier 1 client_credentials grant (Amazon: "if you have a private MCP
+   * server"). Issues `mcp:service` tokens (no refresh token) that may only
+   * initialize and list; tools/call still needs a user token. Needs a secret.
+   */
+  OAUTH_CLIENT_CREDENTIALS: boolFlag,
+  /**
+   * Let initialize / tools/list / resources/list (and reading the ui:// card)
+   * through without a token, so a host can discover tools before linking;
+   * tools/call and everything else still answer 401. Off by default.
+   */
+  MCP_PUBLIC_DISCOVERY: boolFlag,
+  /** Contact line on /privacy and /terms. */
+  STANDIN_CONTACT: opt(z.string().min(1).max(300).default('the owner of the Stand-In GitHub repository (open an issue there)')),
 });
 export type ServerEnv = z.infer<typeof ServerEnvSchema>;
 
@@ -137,6 +198,51 @@ export interface ParseServerEnvOptions {
   allowEphemeralToken?: boolean;
 }
 
+function isLoopbackHostname(h: string): boolean {
+  const n = h.toLowerCase();
+  return n === 'localhost' || n === '127.0.0.1' || n === '[::1]' || n === '::1';
+}
+
+/** A registered redirect URI: absolute https (or http on loopback, for local tests), no fragment. */
+export function isValidRedirectUri(s: string): boolean {
+  let u: URL;
+  try {
+    u = new URL(s);
+  } catch {
+    return false;
+  }
+  if (u.hash !== '' || s.includes('#')) return false;
+  if (u.username !== '' || u.password !== '') return false;
+  return u.protocol === 'https:' || (u.protocol === 'http:' && isLoopbackHostname(u.hostname));
+}
+
+/** Cross-field OAuth checks. Returns offending variable names (never values). */
+function oauthConfigErrors(e: ServerEnv): string[] {
+  const bad: string[] = [];
+  const enabled = e.OAUTH_CLIENT_ID !== undefined;
+  if (!enabled) {
+    if (e.OAUTH_CLIENT_SECRET !== undefined || e.OAUTH_REDIRECT_URIS.length > 0) bad.push('OAUTH_CLIENT_ID');
+    return bad;
+  }
+  if (!e.OAUTH_REDIRECT_URIS.every(isValidRedirectUri)) bad.push('OAUTH_REDIRECT_URIS');
+  // Reachable from other machines: the consent page must authenticate the
+  // owner (passcode) and the token endpoint must authenticate the client
+  // (secret). Otherwise anyone who knows the public client_id and a registered
+  // redirect URI can approve their own request and redeem the code with PKCE.
+  const publicDeployment = !LOOPBACK_BIND.has(e.HOST) || (e.PUBLIC_BASE_URL !== undefined && !isLoopbackHostname(new URL(e.PUBLIC_BASE_URL).hostname));
+  if ((e.OAUTH_CLIENT_CREDENTIALS || publicDeployment) && e.OAUTH_CLIENT_SECRET === undefined) bad.push('OAUTH_CLIENT_SECRET');
+  if (publicDeployment && e.OAUTH_LINK_PASSCODE === undefined) bad.push('OAUTH_LINK_PASSCODE');
+  if (e.PUBLIC_BASE_URL === undefined) {
+    // The issuer and the canonical resource URI come from the request only on a loopback-bound dev server.
+    if (!LOOPBACK_BIND.has(e.HOST)) bad.push('PUBLIC_BASE_URL');
+  } else {
+    const u = new URL(e.PUBLIC_BASE_URL);
+    const httpsOrLocal = u.protocol === 'https:' || (u.protocol === 'http:' && isLoopbackHostname(u.hostname));
+    if (!httpsOrLocal || u.search !== '' || u.hash !== '') bad.push('PUBLIC_BASE_URL');
+  }
+  return bad;
+}
+
 export function parseServerEnv(
   env: Record<string, string | undefined>,
   opts: ParseServerEnvOptions = {},
@@ -145,6 +251,8 @@ export function parseServerEnv(
   if (!r.success) {
     throw new ServerConfigError([...new Set(r.error.issues.map((i) => String(i.path[0] ?? '(root)')))]);
   }
+  const oauthErrors = oauthConfigErrors(r.data);
+  if (oauthErrors.length > 0) throw new ServerConfigError(oauthErrors);
   if (r.data.STANDIN_TOKEN === undefined) {
     if (opts.allowEphemeralToken === true && LOOPBACK_BIND.has(r.data.HOST)) {
       return { ...r.data, STANDIN_TOKEN: randomBytes(32).toString('base64url'), STANDIN_TOKEN_EPHEMERAL: true };

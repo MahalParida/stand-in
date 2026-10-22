@@ -5,8 +5,9 @@
 #
 #   docker build --platform linux/amd64 -t stand-in:latest .
 #
-# No secrets are baked in: STANDIN_TOKEN and the runtime AWS credentials are
-# passed only as container environment at deploy time (scripts/deploy-lightsail.sh).
+# No secrets are baked in: STANDIN_TOKEN, the OAuth client secret and the runtime
+# AWS credentials are passed only as container environment at deploy time
+# (scripts/deploy-lightsail.sh).
 
 ARG NODE_IMAGE=node:22-bookworm-slim
 ARG PNPM_VERSION=12.6.0
@@ -81,6 +82,8 @@ COPY --from=build --chown=root:root /app/packages/providers/dist ./packages/prov
 COPY --from=build --chown=root:root /app/apps/fake-business/dist ./apps/fake-business/dist
 COPY --from=build --chown=root:root /app/apps/call-agent/dist ./apps/call-agent/dist
 COPY --from=build --chown=root:root /app/apps/mcp-server/dist ./apps/mcp-server/dist
+# Alexa+ add-on icons and carousel image, served at /addon-assets/*.png.
+COPY --from=build --chown=root:root /app/apps/mcp-server/assets ./apps/mcp-server/assets
 COPY --from=build --chown=root:root /app/apps/alexa-sim/dist ./apps/alexa-sim/dist
 # Dial allowlist, read at runtime by apps/call-agent (../../../data from dist/).
 COPY --from=build --chown=root:root /app/data/business-directory.json ./data/business-directory.json

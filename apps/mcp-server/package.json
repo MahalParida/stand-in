@@ -20,7 +20,8 @@
     "test": "vitest run",
     "start": "node --env-file-if-exists=../../.env dist/main.js",
     "start:offline": "node --env-file-if-exists=../../.env dist/main.js --mode=offline --daily-cap=50",
-    "dev": "tsx --env-file-if-exists=../../.env src/main.ts"
+    "dev": "tsx --env-file-if-exists=../../.env src/main.ts",
+    "assets": "node scripts/gen-addon-assets.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.1",
@@ -29,6 +30,10 @@
     "@standin/disclosure-guard": "workspace:*",
     "@standin/fake-business": "workspace:*",
     "@standin/providers": "workspace:*",
+    "better-sqlite3": "13.0.3",
     "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "9.6.0"
   }
 }

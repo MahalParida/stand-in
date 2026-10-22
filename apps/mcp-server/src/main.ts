@@ -50,6 +50,12 @@ async function main(): Promise<void> {
     `stand-in: listening on ${url} (mode=${providers.mode}, llm=${providers.mode === 'aws' ? 'bedrock' : providers.config.STANDIN_LLM}, demoToken=${env.DEMO_EMBED_TOKEN ? 'embedded' : env.STANDIN_TOKEN_EPHEMERAL ? 'one-time, local page only' : 'off'})`,
   );
   console.log(`stand-in: MCP endpoint ${url}/mcp (Bearer token from STANDIN_TOKEN); sim host at ${url}/`);
+  if (env.OAUTH_CLIENT_ID !== undefined) {
+    // Names and counts only: never the client id's secret, the passcode or any token.
+    console.log(
+      `stand-in: OAuth account linking on (issuer ${env.PUBLIC_BASE_URL ?? url}, ${env.OAUTH_REDIRECT_URIS.length} redirect URI(s), client ${env.OAUTH_CLIENT_SECRET === undefined ? 'public (PKCE only)' : 'confidential'}, passcode ${env.OAUTH_LINK_PASSCODE === undefined ? 'off' : 'on'})`,
+    );
+  }
   if (env.STANDIN_TOKEN_EPHEMERAL) {
     console.log(
       'stand-in: STANDIN_TOKEN is not set, so this offline run uses a one-time token that the local sim page receives automatically. Set STANDIN_TOKEN in .env (see .env.example) to connect other MCP clients.',

@@ -9,6 +9,7 @@ This is the source for the README's security section (M8).
 | Stand-In used to harass or spam | allowlisted directory, calling hours, per-business daily cap, AI disclosure | `data/business-directory.json`, `packages/core/src/policy.ts` |
 | Scam number injection | numbers never come from the conversation or the LLM | `packages/core/src/policy.ts` |
 | MCP endpoint abuse | Bearer token, Origin validation, 401 without `WWW-Authenticate`, per-IP rate limits; `/sim/api/*` request-shape limits and hourly and daily spend caps (Polly metered per character) | `apps/mcp-server/src/http.ts`, `apps/mcp-server/src/sim-guard.ts`, [DEPLOY.md](DEPLOY.md) |
+| Account linking (Alexa+ OAuth) | pre-registered client only (no dynamic registration), exact-match redirect URI allowlist, PKCE S256 required, `resource` bound to the canonical MCP URI, 60 s single-use codes (reuse revokes the issued tokens), opaque tokens stored as SHA-256 hashes, refresh rotation with family revocation on reuse, constant-time secret and passcode checks, consent page with CSRF token and optional passcode, tokens accepted only in the `Authorization` header | `apps/mcp-server/src/oauth.ts`, `apps/mcp-server/src/oauth-store.ts` |
 | Transcript privacy | masked at write, 30-day TTL, per-case `delete_case` | `apps/call-agent/src/call-session.ts`, `apps/mcp-server` |
 | Tampered history | hash-chained event log with a `verify` command | `packages/core/src/event-log.ts`, `packages/core/src/verify-store.ts` |
 

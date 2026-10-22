@@ -96,7 +96,8 @@ What the script does (it is idempotent; re-running it rolls out a new deployment
    `STANDIN_MODE=aws`, `HOST=0.0.0.0`, `PORT=8080`, `SQLITE_PATH=/data/standin.db`, `DEMO_EMBED_TOKEN=true`,
    `TRUST_PROXY=true`, `STANDIN_ALLOWED_ORIGINS=<service URL>`, `PUBLIC_BASE_URL=<service URL>`, `AWS_REGION`,
    `BEDROCK_MODEL_ID`, `POLLY_VOICE`, `POLLY_VOICE_ALEXA`, the caps below, `STANDIN_TOKEN` (read from `.env`), and
-   the runtime user's `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`. The public endpoint is port 8080 with health check path `/health`.
+   the runtime user's `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`. When account linking is configured (section 2a) it
+   also passes the `OAUTH_*` variables. The public endpoint is port 8080 with health check path `/health`.
 6. `create-container-service-deployment`, waits for the deployment to be `ACTIVE`, prints the URL.
 
 No secret value is printed. AWS responses are filtered with `--query`, because they echo the container environment.
@@ -126,12 +127,45 @@ No secret value is printed. AWS responses are filtered with `--query`, because t
 scripts/smoke-live.sh https://stand-in.<id>.<region>.cs.amazonlightsail.com
 ```
 
-It checks `/health` 200; `POST /mcp` without a token gives 401 with no `WWW-Authenticate`; a foreign
+It checks `/health` 200; a `tools/call` to `POST /mcp` without a token gives 401 with no `WWW-Authenticate`; a foreign
 `Origin` gives 403; `/sim/config` reports `mode: aws`; an authenticated MCP `initialize` + `tools/list`
 through the SDK client (run `pnpm install` first). The token comes from `$STANDIN_TOKEN`, else `.env`,
 else the demo's `/sim/config`; it is never printed.
 
 Logs: `aws lightsail get-container-log --region $REGION --service-name stand-in --container-name standin`.
+
+## 2a. Alexa+ account linking (optional)
+
+The server has a built-in OAuth 2.1 authorization server (`/authorize`, `/token`) so the real Alexa+ can link to it
+as an MCP add-on. The full walkthrough, including the Alexa AI CLI steps, is in
+[alexa-addon/README.md](../alexa-addon/README.md). For the deploy script:
+
+| Variable | Source | Container env |
+| :--- | :--- | :--- |
+| `PUBLIC_BASE_URL` | the service URL, or `LIGHTSAIL_PUBLIC_BASE_URL` for a custom domain | always set; issuer and canonical resource `<URL>/mcp` |
+| `OAUTH_CLIENT_ID` | shell env, else `.env` | set when non-empty; turns linking on |
+| `OAUTH_CLIENT_SECRET` | shell env, else `.env` (at least 24 characters) | secret, never printed; **required** when `OAUTH_CLIENT_ID` is set |
+| `OAUTH_REDIRECT_URIS` | shell env, else `.env` | comma list of every redirect URI Alexa shows |
+| `OAUTH_LINK_PASSCODE` | shell env, else `.env` (at least 8 characters) | secret; **required** when `OAUTH_CLIENT_ID` is set; the consent page asks for it |
+| `OAUTH_CLIENT_CREDENTIALS`, `MCP_PUBLIC_DISCOVERY` | shell env, else `.env` | default `true` when `OAUTH_CLIENT_ID` is set, so Alexa+ can list tools at `alexa-ai deploy` before anyone links |
+| `OAUTH_SCOPES`, `STANDIN_CONTACT` | shell env, else `.env` | set when non-empty |
+
+The server itself refuses to start with OAuth on and a public `PUBLIC_BASE_URL` (or a non-loopback `HOST`) unless
+both `OAUTH_CLIENT_SECRET` and `OAUTH_LINK_PASSCODE` are set. Wrong passcodes are capped per hour globally
+(`OAUTH_PASSCODE_MAX_FAILURES`, default 20) and per client address (a third of that).
+
+Generate the secret and passcode locally without printing them, for example
+`printf 'OAUTH_CLIENT_SECRET=%s\n' "$(openssl rand -base64 33 | tr -d '/+=')" >> .env`.
+
+Tokens are stored as SHA-256 hashes in SQLite (`/data/standin.db`). The Lightsail container disk is ephemeral, so
+every redeploy clears them and linked Alexa users must link again. Alexa caches the auth metadata at
+`alexa-ai deploy` time: if `PUBLIC_BASE_URL`, the scopes or the client settings change, run `alexa-ai deploy` again.
+
+After the deploy, check the listing URLs and the auth discovery chain:
+
+```bash
+node scripts/render-addon.mjs --base-url https://stand-in.<id>.<region>.cs.amazonlightsail.com --verify
+```
 
 ## 3. Cost
 
@@ -152,13 +186,16 @@ Logs: `aws lightsail get-container-log --region $REGION --service-name stand-in 
   it does not stop spending, so set it at or below the total you accept.
 - Lightsail's data transfer allowance covers the demo's traffic.
 
-## 4. Rotate `STANDIN_TOKEN`
+## 4. Rotate `STANDIN_TOKEN` (and the OAuth client secret)
 
 1. Generate a new value and replace `STANDIN_TOKEN` in the local `.env`.
 2. Re-run `scripts/deploy-lightsail.sh` with the same `REGION` / `SERVICE_NAME`. This creates a new deployment
    at the same URL. The SQLite state resets.
 3. Run `scripts/smoke-live.sh <URL>`.
 4. Update every place the old token was given out (README, Devpost text). Judges with the old token get 401.
+
+Rotate `OAUTH_CLIENT_SECRET` the same way, then give Alexa the new value
+(`alexa-ai configure-account-linking`, masked prompt or `ALEXA_CLIENT_SECRET`) and run `alexa-ai deploy`.
 
 Rotate the runtime IAM keys the same way: `aws iam create-access-key --user-name standin-runtime`, redeploy
 with the new `RUNTIME_AWS_*`, then `aws iam delete-access-key --user-name standin-runtime --access-key-id <old id>`.
