@@ -58,3 +58,27 @@ describe('stateless MCP fallback (no Mcp-Session-Id)', () => {
     expect(r.status).toBe(404);
   });
 });
+
+describe('Host check behind a tunnel (loopback bind + PUBLIC_BASE_URL)', () => {
+  const postWithHost = async (url: string, host: string): Promise<number> => {
+    const { request } = await import('node:http');
+    const u = new URL(`${url}/mcp`);
+    return new Promise((resolve, reject) => {
+      const req = request(
+        { hostname: u.hostname, port: u.port, path: u.pathname, method: 'POST', headers: { ...headers(TOKEN), host } },
+        (res) => {
+          res.resume();
+          resolve(res.statusCode ?? 0);
+        },
+      );
+      req.on('error', reject);
+      req.end(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }));
+    });
+  };
+
+  it('allows the declared public host and still refuses any other host', async () => {
+    s = await startServer({ PUBLIC_BASE_URL: 'https://tunnel.example.test' });
+    expect(await postWithHost(s.url, 'tunnel.example.test')).toBe(200);
+    expect(await postWithHost(s.url, 'evil.example.test')).toBe(403);
+  });
+});

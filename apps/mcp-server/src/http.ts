@@ -275,11 +275,14 @@ export function createStandinServer(opts: StandinServerOptions): StandinServer {
     return LOOPBACK_HOSTS.has(name);
   };
 
+  const publicHost = env.PUBLIC_BASE_URL !== undefined ? new URL(env.PUBLIC_BASE_URL).host.toLowerCase() : undefined;
   const hostAllowed = (req: IncomingMessage): boolean => {
     const host = (req.headers.host ?? '').toLowerCase();
     if (env.STANDIN_ALLOWED_HOSTS.length > 0) return env.STANDIN_ALLOWED_HOSTS.map((h) => h.toLowerCase()).includes(host);
     const boundLoopback = env.HOST === '127.0.0.1' || env.HOST === 'localhost' || env.HOST === '::1';
     if (!boundLoopback) return true;
+    // A loopback server behind a tunnel: the operator-declared public host is allowed too.
+    if (publicHost !== undefined && host === publicHost) return true;
     const name = host.startsWith('[') ? host.slice(0, host.indexOf(']') + 1) : (host.split(':')[0] ?? '');
     return LOOPBACK_HOSTS.has(name);
   };
