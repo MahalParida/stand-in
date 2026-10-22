@@ -1,9 +1,14 @@
 {
   "name": "@standin/disclosure-guard",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
+  "description": "Code-level disclosure guard for voice agents: template expansion with tiered facts, output DLP (OTP/PIN/card/Aadhaar/CVV/passwords, spoken-digit aware), inbound social-engineering and prompt-injection classifier, transcript masking.",
+  "keywords": ["dlp", "voice-agent", "prompt-injection", "otp", "pii", "guardrails", "llm-security"],
   "type": "module",
   "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -12,10 +17,12 @@
       "default": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": ["dist", "README.md", "LICENSE"],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "vitest run"
   },
-  "dependencies": {}
+  "dependencies": {
+    "zod": "4.6.7"
+  }
 }
