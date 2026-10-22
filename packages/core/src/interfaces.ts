@@ -44,6 +44,46 @@ export const ChatRequestSchema = z.object({
 });
 export type ChatRequest = z.infer<typeof ChatRequestSchema>;
 
+/* Native tool use (e.g. Bedrock Converse toolConfig / toolUse / toolResult). */
+
+/** A tool the model may call; inputSchema is the tool's JSON Schema. */
+export const ToolChatSpecSchema = z.object({
+  name: z.string().min(1).max(64),
+  description: z.string().max(4000),
+  inputSchema: z.record(z.string(), z.unknown()),
+});
+export type ToolChatSpec = z.infer<typeof ToolChatSpecSchema>;
+
+export const ToolChatCallSchema = z.object({
+  id: z.string().min(1).max(200),
+  name: z.string().min(1).max(64),
+  arguments: z.record(z.string(), z.unknown()),
+});
+export type ToolChatCall = z.infer<typeof ToolChatCallSchema>;
+
+export const ToolChatMessageSchema = z.discriminatedUnion('role', [
+  z.object({ role: z.literal('user'), content: z.string() }),
+  z.object({ role: z.literal('assistant'), content: z.string(), toolCalls: z.array(ToolChatCallSchema).optional() }),
+  /** The result of the assistant's tool call `toolCallId` (JSON text). */
+  z.object({ role: z.literal('tool'), toolCallId: z.string().min(1).max(200), content: z.string(), isError: z.boolean().optional() }),
+]);
+export type ToolChatMessage = z.infer<typeof ToolChatMessageSchema>;
+
+export const ToolChatRequestSchema = z.object({
+  system: z.string(),
+  messages: z.array(ToolChatMessageSchema).min(1),
+  tools: z.array(ToolChatSpecSchema).min(1).max(64),
+  temperature: z.number().min(0).max(2).optional(),
+  maxTokens: z.number().int().positive().optional(),
+});
+export type ToolChatRequest = z.infer<typeof ToolChatRequestSchema>;
+
+export interface ToolChatResult {
+  /** Spoken text (may be empty when the model only calls tools). */
+  text: string;
+  toolCalls: ToolChatCall[];
+}
+
 export interface LlmProvider {
   readonly name: string;
   /**
@@ -51,6 +91,12 @@ export interface LlmProvider {
    * values in `messages` (facts are passed as {{fact:key}} references).
    */
   chat(req: ChatRequest): Promise<string>;
+  /**
+   * Optional native tool use (Bedrock Converse toolConfig). Providers without
+   * it are driven through `chat` with a JSON tool-call protocol in the prompt.
+   * Same rule: no `never`-tier values in the request.
+   */
+  chatWithTools?(req: ToolChatRequest): Promise<ToolChatResult>;
 }
 
 /* ------------------------------------------------------------------ */

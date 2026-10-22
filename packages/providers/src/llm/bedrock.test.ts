@@ -120,3 +120,71 @@ describe('toConverseInput', () => {
     expect(r.messages[2]?.content).toEqual([{ text: 'u1\n\nu2' }]);
   });
 });
+
+describe('BedrockProvider.chatWithTools (native Converse tool use)', () => {
+  const tools = [
+    { name: 'open_case', description: 'Open a case', inputSchema: { type: 'object', properties: { businessName: { type: 'string' } }, required: ['businessName'] } },
+    { name: 'place_call', description: 'Place the call', inputSchema: { type: 'object', properties: { caseId: { type: 'string' } } } },
+  ];
+
+  it('sends toolConfig.tools as toolSpecs and maps toolUse blocks back to tool calls', async () => {
+    const fake = new FakeConverse(async () => ({
+      $metadata: {},
+      output: {
+        message: {
+          role: 'assistant',
+          content: [{ text: 'Opening a case.' }, { toolUse: { toolUseId: 'tooluse_abc123', name: 'open_case', input: { businessName: 'BharatNet' } } }],
+        },
+      },
+      stopReason: 'tool_use',
+      usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+      metrics: { latencyMs: 1 },
+    }));
+    const llm = new BedrockProvider({ region: 'ap-south-1', modelId: 'm', client: fake });
+    const out = await llm.chatWithTools({ system: 'You are Alexa+', messages: [{ role: 'user', content: 'broadband down' }], tools, temperature: 0, maxTokens: 300 });
+    expect(out).toEqual({ text: 'Opening a case.', toolCalls: [{ id: 'tooluse_abc123', name: 'open_case', arguments: { businessName: 'BharatNet' } }] });
+    const input = fake.commands[0]?.input;
+    expect(input?.system).toEqual([{ text: 'You are Alexa+' }]);
+    expect(input?.toolConfig?.tools).toEqual([
+      { toolSpec: { name: 'open_case', description: 'Open a case', inputSchema: { json: tools[0]?.inputSchema } } },
+      { toolSpec: { name: 'place_call', description: 'Place the call', inputSchema: { json: tools[1]?.inputSchema } } },
+    ]);
+    expect(input?.inferenceConfig).toEqual({ temperature: 0, maxTokens: 300 });
+  });
+
+  it('sends earlier tool calls as toolUse and their results as toolResult blocks', async () => {
+    const fake = new FakeConverse(async () => output('Done.'));
+    const llm = new BedrockProvider({ region: 'ap-south-1', modelId: 'm', client: fake });
+    const out = await llm.chatWithTools({
+      system: 's',
+      messages: [
+        { role: 'user', content: 'call them' },
+        { role: 'assistant', content: '', toolCalls: [{ id: 'tc_1_1', name: 'open_case', arguments: { businessName: 'B' } }, { id: 'tc.1/2', name: 'place_call', arguments: { caseId: 'c' } }] },
+        { role: 'tool', toolCallId: 'tc_1_1', content: '{"case":{"id":"c"}}' },
+        { role: 'tool', toolCallId: 'tc.1/2', content: '{"error":"x"}', isError: true },
+      ],
+      tools,
+    });
+    expect(out).toEqual({ text: 'Done.', toolCalls: [] });
+    const msgs = fake.commands[0]?.input.messages;
+    expect(msgs?.map((m) => m.role)).toEqual(['user', 'assistant', 'user']);
+    expect(msgs?.[1]?.content).toEqual([
+      { toolUse: { toolUseId: 'tc_1_1', name: 'open_case', input: { businessName: 'B' } } },
+      { toolUse: { toolUseId: 'tc_1_2', name: 'place_call', input: { caseId: 'c' } } },
+    ]);
+    expect(msgs?.[2]?.content).toEqual([
+      { toolResult: { toolUseId: 'tc_1_1', content: [{ text: '{"case":{"id":"c"}}' }] } },
+      { toolResult: { toolUseId: 'tc_1_2', content: [{ text: '{"error":"x"}' }], status: 'error' } },
+    ]);
+  });
+
+  it('maps SDK errors like chat()', async () => {
+    const fake = new FakeConverse(async () => {
+      throw Object.assign(new Error('nope'), { name: 'AccessDeniedException', $metadata: { httpStatusCode: 403 } });
+    });
+    const llm = new BedrockProvider({ region: 'ap-south-1', modelId: 'm', client: fake });
+    const err: unknown = await llm.chatWithTools({ system: 's', messages: [{ role: 'user', content: 'x' }], tools }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(LlmProviderError);
+    expect((err as LlmProviderError).status).toBe(403);
+  });
+});

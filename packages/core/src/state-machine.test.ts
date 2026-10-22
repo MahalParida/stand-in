@@ -140,6 +140,14 @@ describe('state machine: happy-path edges (spec 5.1)', () => {
     expect(types(r.effects)).toEqual(['state_changed', 'unbridge_user', 'request_plan']);
   });
 
+  it('HUMAN --user_takes_over--> USER_ON_LINE bridges the user ("Take over call"); user_leaves hands back', () => {
+    const r = ok(transition(reach('HUMAN'), { type: 'user_takes_over', at: T0 + 10 }));
+    expect(r.snapshot.state).toBe('USER_ON_LINE');
+    expect(r.effects).toEqual([{ type: 'state_changed', from: 'HUMAN', to: 'USER_ON_LINE', reason: 'user_takeover' }, { type: 'bridge_user' }]);
+    const back = ok(transition(r.snapshot, { type: 'user_leaves', at: T0 + 20 }));
+    expect(back.snapshot.state).toBe('HUMAN');
+  });
+
   it('HANDOFF_PENDING --user_declines--> HUMAN and says they will call back', () => {
     const r = ok(transition(reach('HANDOFF_PENDING'), { type: 'user_declines', at: T0 + 10 }));
     expect(r.snapshot.state).toBe('HUMAN');
@@ -310,6 +318,7 @@ describe('state machine: invalid transitions return errors, never throw', () => 
     { type: 'user_accepts', at },
     { type: 'user_declines', at },
     { type: 'user_leaves', at },
+    { type: 'user_takes_over', at },
     { type: 'outcome_detected', at, outcome: { what: 'x' } },
     { type: 'outcome_confirmed', at },
     { type: 'outcome_rejected', at },
@@ -318,7 +327,7 @@ describe('state machine: invalid transitions return errors, never throw', () => 
     DIALING: ['connected'],
     IVR: ['menu_prompt', 'dtmf', 'hold_detected', 'human_detected'],
     HOLD: ['human_detected', 'hold_detected'],
-    HUMAN: ['disclosure_request', 'hold_detected', 'outcome_detected'],
+    HUMAN: ['disclosure_request', 'hold_detected', 'outcome_detected', 'user_takes_over'],
     HANDOFF_PENDING: ['user_accepts', 'user_declines'],
     USER_ON_LINE: ['user_leaves'],
     WRAP_UP: ['outcome_confirmed', 'outcome_rejected', 'outcome_detected'],

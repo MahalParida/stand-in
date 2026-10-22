@@ -143,6 +143,8 @@ export const FailureReasonSchema = z.enum([
   'dial_failed',
   'carrier_error',
   'error',
+  /** The server process ended while the call was live (recovered at the next start). */
+  'server_restart',
 ]);
 export type FailureReason = z.infer<typeof FailureReasonSchema>;
 

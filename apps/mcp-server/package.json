@@ -12,10 +12,23 @@
       "default": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "start": "node --env-file-if-exists=../../.env dist/main.js",
+    "start:offline": "node --env-file-if-exists=../../.env dist/main.js --mode=offline --daily-cap=50",
+    "dev": "tsx --env-file-if-exists=../../.env src/main.ts"
   },
-  "dependencies": {}
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "@standin/call-agent": "workspace:*",
+    "@standin/core": "workspace:*",
+    "@standin/disclosure-guard": "workspace:*",
+    "@standin/fake-business": "workspace:*",
+    "@standin/providers": "workspace:*",
+    "zod": "4.6.7"
+  }
 }

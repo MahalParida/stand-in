@@ -396,6 +396,11 @@ export class CallSession {
     return this.#action('HANDOFF_PENDING', { type: 'user_declines' });
   }
 
+  /** "Take over call": the user joins while a person is on the line (HUMAN only). */
+  takeOver(): Promise<ActionResult> {
+    return this.#action('HUMAN', { type: 'user_takes_over' });
+  }
+
   /** The bridged user leaves; the agent carries on. */
   userLeave(): Promise<ActionResult> {
     return this.#action('USER_ON_LINE', { type: 'user_leaves' });
@@ -498,7 +503,7 @@ export class CallSession {
     }).then(() => result);
   }
 
-  #action(required: CallState, input: { type: 'user_accepts' | 'user_declines' | 'user_leaves' }): Promise<ActionResult> {
+  #action(required: CallState, input: { type: 'user_accepts' | 'user_declines' | 'user_leaves' | 'user_takes_over' }): Promise<ActionResult> {
     return this.#enqueueResult(async () => {
       if (this.#snap.state !== required) {
         return { ok: false, error: `expected state ${required}, call is ${this.#snap.state}`, state: this.#snap.state };
@@ -720,6 +725,8 @@ export class CallSession {
       case 'carrier_error':
       case 'error':
         return `Something went wrong on the line with ${n}, so the call was stopped. No request was confirmed.`;
+      case 'server_restart':
+        return `The call to ${n} was dropped because Stand-In restarted. No request was confirmed.`;
     }
   }
 

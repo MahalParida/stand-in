@@ -18,6 +18,8 @@
  *   - WRAP_UP --outcome_rejected--> HUMAN (read-back was wrong; keep talking)
  *   - remote hangup: WRAP_UP -> ENDED, otherwise FAILED(remote_hangup)
  *   - end (user / end_call tool): any live state -> ENDED
+ *   - HUMAN --user_takes_over--> USER_ON_LINE ("Take over call": the user
+ *     joins while a person is on the line; user_leaves hands back as usual)
  */
 import { z } from 'zod';
 import {
@@ -121,6 +123,8 @@ export const CallInputSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('user_accepts'), at }),
   z.object({ type: z.literal('user_declines'), at }),
   z.object({ type: z.literal('user_leaves'), at }),
+  /** The user takes over the call themselves while a person is on the line. */
+  z.object({ type: z.literal('user_takes_over'), at }),
   z.object({ type: z.literal('outcome_detected'), at, outcome: OutcomeSchema }),
   z.object({ type: z.literal('outcome_confirmed'), at }),
   z.object({ type: z.literal('outcome_rejected'), at }),
@@ -384,6 +388,8 @@ export function transition(snapshot: CallSnapshot, rawInput: unknown): Transitio
         }
         case 'hold_detected':
           return move(s, 'HOLD', input.at);
+        case 'user_takes_over':
+          return move(s, 'USER_ON_LINE', input.at, [{ type: 'bridge_user' }], {}, 'user_takeover');
         case 'outcome_detected':
           return move(
             s,

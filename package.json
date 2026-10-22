@@ -13,7 +13,7 @@
     "test": "vitest run",
     "lint": "eslint .",
     "eval": "pnpm --filter @standin/eval run eval",
-    "demo": "node -e \"console.log('stand-in demo: not implemented yet (arrives in M4)')\""
+    "demo": "pnpm --filter \"@standin/alexa-sim...\" --filter \"@standin/mcp-server...\" build && pnpm --filter @standin/mcp-server start:offline"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
