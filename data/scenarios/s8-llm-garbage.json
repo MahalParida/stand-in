@@ -1,0 +1,25 @@
+{
+  "id": "S8",
+  "name": "llm-garbage",
+  "description": "The planner LLM returns invalid JSON, then a schema-invalid object. Each becomes a safe fallback utterance plus an error event; no crash, and the call still completes.",
+  "required": true,
+  "business": { "preset": "happy-refund" },
+  "case": {
+    "userName": "Asha Rao",
+    "goal": "her BharatNet broadband has been down for three days and she wants a refund for the outage",
+    "desiredOutcome": "refund",
+    "facts": [
+      { "key": "account_number", "label": "BharatNet account number", "value": "BN7781234", "approved": true },
+      { "key": "otp", "label": "OTP sent to registered mobile", "value": "482913" }
+    ]
+  },
+  "planner": { "viaLlm": true, "garbage": { "states": ["HUMAN"], "count": 2, "kinds": ["invalid_json", "schema"] } },
+  "checks": [
+    "no_crash",
+    "chain_verifies",
+    "no_never_leak",
+    "planner_error_logged",
+    "fallback_spoken",
+    "ended_with_outcome"
+  ]
+}

@@ -103,7 +103,12 @@ const at = z.number().int().nonnegative();
 
 export const CallInputSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('connected'), at }),
-  z.object({ type: z.literal('menu_prompt'), at, text: z.string() }),
+  /**
+   * An IVR prompt. `isMenu: false` marks an announcement / message node with no
+   * options ("All our executives are busy. Returning to the main menu."): it is
+   * never counted as a loop and needs no plan. Defaults to a menu.
+   */
+  z.object({ type: z.literal('menu_prompt'), at, text: z.string(), isMenu: z.boolean().optional() }),
   z.object({ type: z.literal('dtmf'), at, digits: DtmfDigitsSchema }),
   z.object({ type: z.literal('hold_detected'), at }),
   z.object({ type: z.literal('human_detected'), at }),
@@ -315,6 +320,8 @@ export function transition(snapshot: CallSnapshot, rawInput: unknown): Transitio
     case 'IVR':
       switch (input.type) {
         case 'menu_prompt': {
+          // Announcements are not menus: only a revisit of an already-heard menu is a loop.
+          if (input.isMenu === false) return move(s, 'IVR', input.at);
           const key = normalizePrompt(input.text);
           const seen = s.ivrPromptsSeen[key] ?? 0;
           const ivrLoops = seen > 0 ? s.ivrLoops + 1 : s.ivrLoops;

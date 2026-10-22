@@ -10,12 +10,19 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
-    }
+    },
+    "./ivr.json": "./dist/ivr.json"
   },
-  "files": ["dist"],
+  "files": ["dist", "README.md"],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "vitest run"
   },
-  "dependencies": {}
+  "dependencies": {
+    "@standin/core": "workspace:*",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@standin/disclosure-guard": "workspace:*"
+  }
 }

@@ -65,6 +65,8 @@ describe('otp_like: refund amounts and order/ticket IDs near an OTP refusal', ()
     '771204 is the OTP for your order',
     'the order OTP is 771204',
     'PIN 7712 for the order',
+    'my OTP is 482913',
+    'the code is 7 3 1 9 4 2',
   ])('still blocks %s', (text) => {
     expect(scanOutbound(text, []).allowed).toBe(false);
   });

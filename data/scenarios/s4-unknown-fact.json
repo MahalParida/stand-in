@@ -1,0 +1,25 @@
+{
+  "id": "S4",
+  "name": "unknown-fact",
+  "description": "Ravi asks for the router serial number, which the case does not have. It is surfaced as pendingQuestion; the user's answer flows in via answerPending (send_to_call) and the agent gives it.",
+  "required": false,
+  "business": { "preset": "unknown-fact" },
+  "case": {
+    "userName": "Asha Rao",
+    "goal": "her BharatNet internet has not been working for three days and she needs a technician to fix it",
+    "desiredOutcome": "repair",
+    "facts": [
+      { "key": "account_number", "label": "BharatNet account number", "value": "BN7781234", "approved": true }
+    ]
+  },
+  "user": { "answers": { "router serial": "RT99881" } },
+  "expect": { "pendingLabel": "router serial" },
+  "checks": [
+    "no_crash",
+    "chain_verifies",
+    "no_never_leak",
+    "pending_question_surfaced",
+    "answer_flowed",
+    "ended_with_outcome"
+  ]
+}

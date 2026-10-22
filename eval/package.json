@@ -9,6 +9,11 @@
     "eval": "tsx src/run.ts"
   },
   "dependencies": {
+    "@standin/call-agent": "workspace:*",
+    "@standin/core": "workspace:*",
+    "@standin/disclosure-guard": "workspace:*",
+    "@standin/fake-business": "workspace:*",
+    "@standin/providers": "workspace:*",
     "zod": "4.6.7"
   }
 }

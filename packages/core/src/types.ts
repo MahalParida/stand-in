@@ -74,19 +74,47 @@ export const CasePromiseSchema = z.object({
 });
 export type CasePromise = z.infer<typeof CasePromiseSchema>;
 
-export const CaseSchema = z.object({
-  id: z.string().min(1),
-  userName: z.string().min(1).max(200),
-  businessId: z.string().min(1),
-  goal: z.string().min(1).max(2000),
-  desiredOutcome: DesiredOutcomeSchema,
-  facts: z.array(CaseFactSchema),
-  status: CaseStatusSchema,
-  promises: z.array(CasePromiseSchema),
-  calls: z.array(z.string().min(1)),
-  createdAt: IsoDateTimeSchema,
-  updatedAt: IsoDateTimeSchema,
-});
+/** Shortest never-tier value (letters+digits) checked for inside fact keys. */
+const KEY_LEAK_MIN_CHARS = 4;
+
+const alnumLower = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+/**
+ * True when `key` embeds the value of a never-tier fact (case-, space- and
+ * punctuation-insensitive), e.g. key `otp_482913` for OTP value "482 913".
+ * Fact keys reach the planner/LLM and the stored event log, so such a key
+ * would leak the secret.
+ */
+export function factKeyEmbedsNeverValue(key: string, facts: readonly Pick<CaseFact, 'tier' | 'value'>[]): boolean {
+  const k = alnumLower(key);
+  return facts.some((f) => {
+    if (f.tier !== 'never') return false;
+    const v = alnumLower(f.value);
+    return v.length >= KEY_LEAK_MIN_CHARS && k.includes(v);
+  });
+}
+
+export const CaseSchema = z
+  .object({
+    id: z.string().min(1),
+    userName: z.string().min(1).max(200),
+    businessId: z.string().min(1),
+    goal: z.string().min(1).max(2000),
+    desiredOutcome: DesiredOutcomeSchema,
+    facts: z.array(CaseFactSchema),
+    status: CaseStatusSchema,
+    promises: z.array(CasePromiseSchema),
+    calls: z.array(z.string().min(1)),
+    createdAt: IsoDateTimeSchema,
+    updatedAt: IsoDateTimeSchema,
+  })
+  .superRefine((c, ctx) => {
+    c.facts.forEach((f, i) => {
+      if (factKeyEmbedsNeverValue(f.key, c.facts)) {
+        ctx.addIssue({ code: 'custom', path: ['facts', i, 'key'], message: 'fact key must not contain a never-tier value' });
+      }
+    });
+  });
 export type Case = z.infer<typeof CaseSchema>;
 
 /* ------------------------------------------------------------------ */

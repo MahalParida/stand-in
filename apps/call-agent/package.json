@@ -17,5 +17,11 @@
     "build": "tsc -p tsconfig.json",
     "test": "vitest run"
   },
-  "dependencies": {}
+  "dependencies": {
+    "@standin/core": "workspace:*",
+    "@standin/disclosure-guard": "workspace:*",
+    "@standin/fake-business": "workspace:*",
+    "@standin/providers": "workspace:*",
+    "zod": "4.6.7"
+  }
 }

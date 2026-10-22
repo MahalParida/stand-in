@@ -12,10 +12,17 @@
       "default": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "vitest run"
   },
-  "dependencies": {}
+  "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "3.1149.0",
+    "@aws-sdk/client-polly": "3.1149.0",
+    "@standin/core": "workspace:*",
+    "zod": "4.6.7"
+  }
 }

@@ -265,6 +265,28 @@ describe('state machine: failure edges', () => {
     expect(last.snapshot.failureReason).toBe('ivr_dead_end');
   });
 
+  it('repeated announcements (isMenu: false) are not loops; only menu revisits count', () => {
+    const menu = 'For billing, press 1. To repeat this menu, press 9.';
+    const busy = 'All our executives are busy right now. Returning to the main menu.';
+    const r = runInputs(reach('IVR'), [
+      { type: 'menu_prompt', at: T0 + 10, text: 'Welcome.', isMenu: false },
+      { type: 'menu_prompt', at: T0 + 11, text: menu },
+      { type: 'dtmf', at: T0 + 12, digits: '1' },
+      { type: 'menu_prompt', at: T0 + 13, text: busy, isMenu: false },
+      { type: 'menu_prompt', at: T0 + 14, text: menu }, // loop 1
+      { type: 'dtmf', at: T0 + 15, digits: '1' },
+      { type: 'menu_prompt', at: T0 + 16, text: busy, isMenu: false },
+      { type: 'menu_prompt', at: T0 + 17, text: busy, isMenu: false },
+      { type: 'menu_prompt', at: T0 + 18, text: menu }, // loop 2
+    ]);
+    expect(r.error).toBeUndefined();
+    expect(r.snapshot.state).toBe('IVR');
+    expect(r.snapshot.ivrLoops).toBe(2);
+    expect(r.effects.filter((e) => e.type === 'request_plan')).toHaveLength(3);
+    const last = ok(transition(r.snapshot, { type: 'menu_prompt', at: T0 + 19, text: menu })); // loop 3
+    expect(last.snapshot).toMatchObject({ state: 'FAILED', failureReason: 'ivr_dead_end', ivrLoops: 3 });
+  });
+
   it('distinct IVR menus do not count as loops', () => {
     const r = runInputs(reach('IVR'), [
       { type: 'menu_prompt', at: T0 + 10, text: 'Main menu' },

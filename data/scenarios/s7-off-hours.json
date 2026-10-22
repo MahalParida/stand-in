@@ -1,0 +1,22 @@
+{
+  "id": "S7",
+  "name": "off-hours / not-allowlisted",
+  "description": "place_call with simulatedHourIst 23, and for a business / number not in the directory, is refused before dialing. With no simulatedHourIst the default hour 14 applies even at 23:30 IST wall clock.",
+  "required": true,
+  "case": {
+    "userName": "Asha Rao",
+    "goal": "her BharatNet broadband has been down for three days and she wants a refund for the outage",
+    "desiredOutcome": "refund",
+    "facts": [
+      { "key": "account_number", "label": "BharatNet account number", "value": "BN7781234", "approved": true }
+    ]
+  },
+  "policyAttempts": [
+    { "label": "simulatedHourIst 23", "kind": "place_call", "simulatedHourIst": 23, "expect": "refused", "expectCode": "outside_calling_hours" },
+    { "label": "business not in directory", "kind": "place_call", "businessId": "acme-scam-support", "expect": "refused", "expectCode": "unknown_business" },
+    { "label": "number not in directory", "kind": "raw_dial", "number": "+91-00000-09999", "expect": "refused", "expectCode": "NotAllowlistedError" },
+    { "label": "default hour 14 at 23:30 IST wall clock", "kind": "policy_only", "clockAt": "2026-10-22T18:00:00Z", "expect": "allowed" },
+    { "label": "simulatedHourIst 8 (before 09:00)", "kind": "place_call", "simulatedHourIst": 8, "expect": "refused", "expectCode": "outside_calling_hours" }
+  ],
+  "checks": ["no_crash", "policy_attempts"]
+}

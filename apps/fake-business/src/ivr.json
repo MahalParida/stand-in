@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "business": "BharatNet Broadband",
+  "variants": {
+    "standard": {
+      "start": "welcome",
+      "invalidPrompt": "Sorry, that is not a valid option.",
+      "noInputGoodbye": "We did not receive any input. Thank you for calling BharatNet Broadband. Goodbye.",
+      "nodes": {
+        "welcome": {
+          "type": "message",
+          "prompt": "Welcome to BharatNet Broadband. This call may be recorded for quality and training purposes.",
+          "next": "main"
+        },
+        "main": {
+          "type": "menu",
+          "prompt": "For billing, press 1. For technical support, press 2. For refunds, press 3. To repeat this menu, press 9.",
+          "options": { "1": "billing", "2": "technical", "3": "refunds", "9": "main" }
+        },
+        "billing": {
+          "type": "menu",
+          "prompt": "Billing. To get your latest bill by SMS, press 1. To speak to a billing executive, press 2. To go back to the main menu, press 0. To repeat this menu, press 9.",
+          "options": { "1": "bill_sent", "2": "queue", "0": "main", "9": "billing" }
+        },
+        "bill_sent": {
+          "type": "message",
+          "prompt": "Your latest bill has been sent to your registered mobile number.",
+          "next": "main"
+        },
+        "technical": {
+          "type": "menu",
+          "prompt": "Technical support. If your internet is not working, press 1. For router or Wi-Fi setup, press 2. To go back to the main menu, press 0. To repeat this menu, press 9.",
+          "options": { "1": "outage_check", "2": "queue", "0": "main", "9": "technical" }
+        },
+        "outage_check": {
+          "type": "message",
+          "prompt": "There is no known outage in your area. Please stay on the line to speak to a technical executive.",
+          "next": "queue"
+        },
+        "refunds": {
+          "type": "menu",
+          "prompt": "Refunds and credits. To check the status of an existing refund, press 1. To request a new refund or bill credit, press 2. To go back to the main menu, press 0. To repeat this menu, press 9.",
+          "options": { "1": "queue", "2": "queue", "0": "main", "9": "refunds" }
+        },
+        "queue": {
+          "type": "queue",
+          "prompt": "Please hold while we connect you to the next available executive."
+        }
+      }
+    },
+    "loop": {
+      "start": "welcome",
+      "invalidPrompt": "Sorry, that is not a valid option.",
+      "noInputGoodbye": "We did not receive any input. Thank you for calling BharatNet Broadband. Goodbye.",
+      "nodes": {
+        "welcome": {
+          "type": "message",
+          "prompt": "Welcome to BharatNet Broadband. This call may be recorded for quality and training purposes.",
+          "next": "main"
+        },
+        "main": {
+          "type": "menu",
+          "prompt": "For billing, press 1. For technical support, press 2. For refunds, press 3. To repeat this menu, press 9.",
+          "options": { "1": "busy", "2": "busy", "3": "busy", "0": "busy", "9": "main" }
+        },
+        "busy": {
+          "type": "message",
+          "prompt": "All our executives are busy right now. Returning to the main menu.",
+          "next": "main"
+        }
+      }
+    }
+  }
+}

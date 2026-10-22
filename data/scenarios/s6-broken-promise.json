@@ -1,0 +1,24 @@
+{
+  "id": "S6",
+  "name": "broken-promise",
+  "description": "Call 1 gets SR-48213 due 29 Oct. Day N+1 the scheduled follow-up job calls again, quotes SR-48213 and gets escalated to a supervisor with a new SR id.",
+  "required": false,
+  "business": { "preset": "happy-refund" },
+  "followup": { "business": { "preset": "broken-promise" } },
+  "case": {
+    "userName": "Asha Rao",
+    "goal": "her BharatNet broadband has been down for three days and she wants a refund for the outage",
+    "desiredOutcome": "refund",
+    "facts": [
+      { "key": "account_number", "label": "BharatNet account number", "value": "BN7781234", "approved": true }
+    ]
+  },
+  "checks": [
+    "no_crash",
+    "chain_verifies",
+    "no_never_leak",
+    "followup_scheduled",
+    "followup_quotes_ticket",
+    "escalated"
+  ]
+}
