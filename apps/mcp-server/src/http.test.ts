@@ -57,8 +57,12 @@ describe('/mcp auth', () => {
     expect(sid).toBeTruthy();
     await r.text();
     expect(s.server.sessionCount()).toBe(1);
+    // No session id: served statelessly (Alexa+ keeps none), and no extra session is created.
     const noSession = await mcpPost(s.url, { authorization: `Bearer ${TOKEN}` }, { jsonrpc: '2.0', id: 2, method: 'tools/list' });
-    expect(noSession.status).toBe(400);
+    expect(noSession.status).toBe(200);
+    expect(noSession.headers.get('mcp-session-id')).toBeNull();
+    await noSession.text();
+    expect(s.server.sessionCount()).toBe(1);
     const badSession = await mcpPost(s.url, { authorization: `Bearer ${TOKEN}`, 'mcp-session-id': 'nope' }, { jsonrpc: '2.0', id: 2, method: 'tools/list' });
     expect(badSession.status).toBe(404);
     const del = await fetch(`${s.url}/mcp`, { method: 'DELETE', headers: { authorization: `Bearer ${TOKEN}`, 'mcp-session-id': sid ?? '' } });
