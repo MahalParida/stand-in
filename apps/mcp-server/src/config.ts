@@ -64,6 +64,26 @@ export const ServerEnvSchema = z.object({
   /** Global hourly budget of model calls / Polly requests across all clients (0 = never call them). */
   SIM_LLM_HOURLY_CAP: opt(z.coerce.number().int().min(0).default(300)),
   SIM_TTS_HOURLY_CAP: opt(z.coerce.number().int().min(0).default(1500)),
+  /**
+   * Global daily budget (per UTC day, process-wide) of model calls / Polly
+   * requests, on top of the hourly caps. Once spent, /sim/api/llm answers with
+   * the scripted orchestrator and /sim/api/tts with 204 (browser voice) until
+   * 00:00 UTC, and the page shows a small "demo budget reached" note.
+   */
+  SIM_LLM_DAILY_CAP: opt(z.coerce.number().int().min(0).default(400)),
+  SIM_TTS_DAILY_CAP: opt(z.coerce.number().int().min(0).default(1000)),
+  /**
+   * Polly is billed per character (neural: about $16 per 1M), so /sim/api/tts
+   * is also metered in characters: a global hourly and per-UTC-day budget of
+   * synthesized characters, on top of the request caps. 50k chars/day is
+   * about $0.80/day at neural list prices.
+   */
+  SIM_TTS_HOURLY_CHAR_CAP: opt(z.coerce.number().int().min(0).default(15_000)),
+  SIM_TTS_DAILY_CHAR_CAP: opt(z.coerce.number().int().min(0).default(50_000)),
+  /** Transcript privacy (spec 13): cases, their calls and transcripts are purged this many days after their last update. */
+  TRANSCRIPT_TTL_DAYS: opt(z.coerce.number().int().min(1).max(365).default(30)),
+  /** How often the TTL purge runs (ms). */
+  RETENTION_SWEEP_MS: opt(z.coerce.number().int().min(1000).default(60 * 60 * 1000)),
   /** Max concurrent MCP sessions. */
   MAX_SESSIONS: opt(z.coerce.number().int().positive().default(200)),
   /** Max concurrent MCP sessions created from one client address; above it that address's oldest session is evicted. */

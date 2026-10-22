@@ -1,5 +1,5 @@
 /**
- * MCP surface (spec 7): 10 tools, 3 resources, elicitation, resource-updated
+ * MCP surface (spec 7): 10 tools + delete_case (spec 13), 3 resources, elicitation, resource-updated
  * notifications. One McpServer per Streamable HTTP session; all sessions
  * share one StandinApp.
  *
@@ -23,6 +23,8 @@ import {
   CallStatusInputSchema,
   CallStatusOutputSchema,
   CaseResourceSchema,
+  DeleteCaseInputSchema,
+  DeleteCaseOutputSchema,
   EndCallInputSchema,
   EndCallOutputSchema,
   GetCaseInputSchema,
@@ -335,6 +337,19 @@ export function createMcpServer(app: StandinApp): McpSessionHandle {
         touchCase(out.job.caseId);
         return out;
       }),
+  );
+
+  server.registerTool(
+    TOOL_NAMES.deleteCase,
+    {
+      title: 'Delete a case',
+      description:
+        'Permanently delete a case with its call transcripts and scheduled follow-ups (privacy). Only when the user explicitly asks to delete or forget it; confirm first. Refused while a call for the case is in progress.',
+      inputSchema: DeleteCaseInputSchema,
+      outputSchema: DeleteCaseOutputSchema,
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+    },
+    async (args) => run(async () => app.deleteCase(args.caseId)),
   );
 
   /* ---------------- resources ---------------- */

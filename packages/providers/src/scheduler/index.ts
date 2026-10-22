@@ -1,8 +1,10 @@
 /**
  * Local follow-up scheduler (spec 2.1: sqlite `jobs` table + in-process ticker).
- * Interface-compatible stub; retries/backoff and the follow-up handler land in M5.
+ * The ticker runs every due job once (pending -> running -> done | failed);
+ * the MCP server's handler places the S6 follow-up call that quotes the ticket.
  *
  * Backed by any JobRepo: core's SqliteRepo, or InMemoryJobRepo below.
+ * The AWS adapter (EventBridge Scheduler) lives in ./eventbridge.ts.
  */
 import { JobSchema, systemClock, type Clock, type Job, type JobRepo, type Scheduler } from '@standin/core';
 import { z } from 'zod';
@@ -11,6 +13,15 @@ const ScheduleInputSchema = JobSchema.pick({ id: true, kind: true, caseId: true,
 export type ScheduleInput = z.infer<typeof ScheduleInputSchema>;
 
 export type JobHandler = (job: Job) => Promise<void>;
+
+/** A Scheduler the server can start/stop: the local ticker or EventBridge Scheduler. */
+export interface FollowupScheduler extends Scheduler {
+  readonly kind: 'local' | 'eventbridge';
+  /** Starts running due jobs with `handler` (a no-op when a remote service fires them). */
+  start(handler: JobHandler, intervalMs?: number): void;
+  stop(): void;
+  readonly running: boolean;
+}
 
 /** In-memory JobRepo, for tests and for wiring without a database. */
 export class InMemoryJobRepo implements JobRepo {
@@ -51,7 +62,8 @@ export interface LocalSchedulerOptions {
   clock?: Clock;
 }
 
-export class LocalScheduler implements Scheduler {
+export class LocalScheduler implements FollowupScheduler {
+  readonly kind = 'local' as const;
   readonly #repo: JobRepo;
   readonly #clock: Clock;
   #timer: ReturnType<typeof setInterval> | undefined;

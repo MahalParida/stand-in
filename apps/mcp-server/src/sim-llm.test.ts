@@ -225,7 +225,8 @@ describe('scripted matcher (pure)', () => {
       ],
       tools,
     };
-    expect(scriptedOrchestrator(req, ctx).text).toMatch(/couldn't do that: BharatNet takes calls/);
+    // A known refusal code gets the shared, specific copy (spec S5), whatever the message said.
+    expect(scriptedOrchestrator(req, ctx).text).toMatch(/I didn't call BharatNet Broadband: I only place calls between 09:00 and 20:00 IST.*Nothing was dialled/);
   });
 
   it('reads tool errors exactly as the browser sends them (real toolResultForLlm/toOutcome)', () => {
@@ -241,7 +242,7 @@ describe('scripted matcher (pure)', () => {
       toOutcome({ isError: true, content: [{ type: 'text', text: JSON.stringify({ error: { code: 'outside_calling_hours', message: 'BharatNet takes calls 09:00-20:00 IST' } }) }] }),
     );
     const r = scriptedOrchestrator(asTool(denied), ctx);
-    expect(r.text).toMatch(/couldn't do that: BharatNet takes calls 09:00-20:00 IST/);
+    expect(r.text).toMatch(/only place calls between 09:00 and 20:00 IST/);
     expect(r.text).not.toMatch(/on the line/);
     // Non-ToolError failure text, and the legacy bare-string shape, are errors too.
     const plain = toolResultForLlm(toOutcome({ isError: true, content: [{ type: 'text', text: 'daily call cap reached' }] }));
@@ -324,5 +325,41 @@ describe('LLM-backed orchestrator (LocalLlm / Bedrock path)', () => {
       expect(r.fallback).toBe(true);
       expect(r.response.toolCalls?.[0]?.name).toBe('open_case');
     }
+  });
+});
+
+describe('scripted orchestrator: delete my case (spec 13)', () => {
+  const ctx = { now: new Date('2026-10-22T08:30:00Z'), businesses: [{ name: 'BharatNet Broadband', aliases: [] }] };
+  const tools: LlmToolSpec[] = ['open_case', 'delete_case', 'get_case'].map((name) => ({ name, description: name, inputSchema: { type: 'object' } }));
+  const opened = JSON.stringify({ case: { id: 'case-1', businessName: 'BharatNet Broadband', status: 'promised', promises: [] }, missingFacts: [] });
+
+  it('asks delete_case for the open case, then reads back the server message', () => {
+    const history: SimLlmRequest['messages'] = [
+      { role: 'user', content: 'My BharatNet broadband is down' },
+      { role: 'assistant', content: '', toolCalls: [{ id: 't1', name: 'open_case', arguments: {} }] },
+      { role: 'tool', toolCallId: 't1', content: opened },
+      { role: 'assistant', content: 'Okay.' },
+      { role: 'user', content: 'Please delete my BharatNet complaint and its transcripts' },
+    ];
+    const r = scriptedOrchestrator({ messages: history, tools }, ctx);
+    expect(r.toolCalls?.[0]).toMatchObject({ name: 'delete_case', arguments: { caseId: 'case-1' } });
+    const done = scriptedOrchestrator(
+      {
+        messages: [
+          ...history,
+          { role: 'assistant', content: '', toolCalls: [{ id: 't2', name: 'delete_case', arguments: { caseId: 'case-1' } }] },
+          { role: 'tool', toolCallId: 't2', content: JSON.stringify({ caseId: 'case-1', deleted: true, callsDeleted: 1, followupsCancelled: 0, message: 'Deleted your case with BharatNet Broadband, 1 call transcript(s).' }) },
+        ],
+        tools,
+      },
+      ctx,
+    );
+    expect(done.text).toBe('Deleted your case with BharatNet Broadband, 1 call transcript(s).');
+  });
+
+  it('with no case in the conversation it says so instead of guessing', () => {
+    const r = scriptedOrchestrator({ messages: [{ role: 'user', content: 'forget my case' }], tools }, ctx);
+    expect(r.toolCalls).toBeUndefined();
+    expect(r.text).toMatch(/don't have a case open/);
   });
 });

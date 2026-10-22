@@ -26,8 +26,9 @@ export function DeviceScreen({ ctl, state, holdScale }: Props) {
       mapCallStatus(status, {
         caseReady: state.caseReady,
         ...(state.caseView?.businessName !== undefined ? { businessName: state.caseView.businessName } : {}),
+        ...(state.refusal !== undefined ? { refusal: state.refusal } : {}),
       }),
-    [status, state.caseReady, state.caseView?.businessName],
+    [status, state.caseReady, state.caseView?.businessName, state.refusal],
   );
   const lastUser = [...state.chat].reverse().find((c) => c.role === 'user');
   const lastReply = [...state.chat].reverse().find((c) => c.role === 'assistant');
@@ -102,6 +103,7 @@ export function DeviceScreen({ ctl, state, holdScale }: Props) {
               caseReady={state.caseReady}
               caseResult={state.caseResult}
               businessName={state.caseView?.businessName}
+              refusal={state.refusal}
               holdScale={holdScale}
               actions={actions}
               onCardToolResult={onCardToolResult}
@@ -109,6 +111,11 @@ export function DeviceScreen({ ctl, state, holdScale }: Props) {
           )}
 
           {state.notice !== undefined && <div className="toast">{state.notice}</div>}
+          {state.budgetNote !== undefined && (
+            <div className="budget-note" role="status" title="The hosted demo's daily model / voice budget is spent; it resets at 00:00 UTC.">
+              {state.budgetNote}
+            </div>
+          )}
 
           <form
             className="inputbar"

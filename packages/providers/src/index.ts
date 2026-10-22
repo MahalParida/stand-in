@@ -10,3 +10,4 @@ export * from './tts/browser.js';
 export * from './tts/polly.js';
 export * from './repo/index.js';
 export * from './scheduler/index.js';
+export * from './scheduler/eventbridge.js';

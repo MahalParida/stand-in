@@ -17,12 +17,14 @@ import {
   UpdateCaseFactOutputSchema,
   callTranscriptUri,
   caseUri,
+  refusalReason,
   TranscriptResourceSchema,
   type AutoplayScenario,
   type CallLine,
   type CallState,
   type CallStatusOutput,
   type CaseView,
+  type FailureReason,
   type LlmMessage,
   type LlmToolSpec,
   type SimConfig,
@@ -42,7 +44,7 @@ import { toCallToolResult, type CallToolResultLike } from './card-bridge.js';
 import { connectMcp, isSessionLost, toLlmToolSpecs, type ElicitationRequest, type McpSession, type ToolCallOutcome } from './mcp.js';
 import { mergeLines, voiceForSpeaker } from './lines.js';
 import { isCallLost, lostCallStatus } from './lost-call.js';
-import { createLlmClient, runTurn, type LlmFn } from './orchestrator.js';
+import { budgetNote, createLlmClient, runTurn, type LlmFn } from './orchestrator.js';
 import { maskText } from './redact.js';
 import { Speaker } from './speech.js';
 import { TraceRecorder } from './trace.js';
@@ -93,6 +95,10 @@ export interface SimState {
   cardHtml?: string;
   muted: boolean;
   notice?: string;
+  /** place_call was refused before dialling: the card shows it honestly (spec S5/S7). */
+  refusal?: { reason: FailureReason; message: string };
+  /** Quiet note when the hosted demo's daily/hourly model or Polly budget is spent. */
+  budgetNote?: string;
   /** Bumped when the MCP session is replaced after the server lost it. */
   sessionEpoch: number;
 }
@@ -133,6 +139,7 @@ export class SimController {
   #announcedEnd = new Set<string>();
   #autoAnswered = new Set<string>();
   #seenCalls = new Set<string>();
+  #budgetSpent = { llm: false, tts: false };
 
   constructor(autoplay: AutoplayScenario | undefined) {
     if (autoplay !== undefined) this.#state = { ...this.#state, autoplay };
@@ -285,15 +292,16 @@ export class SimController {
     this.#token = token;
     this.#set({ phase: 'connecting', error: undefined });
     const config = this.#state.config;
-    this.#speaker = new Speaker(config?.tts === 'polly' ? 'polly' : 'browser', () => this.#token);
+    this.#speaker = new Speaker(config?.tts === 'polly' ? 'polly' : 'browser', () => this.#token, () => this.#budget('tts'));
     this.#speaker.setMuted(this.#state.muted);
+    const onBudget = (kind: 'llm' | 'tts'): void => this.#budget(kind);
     // Reads the current token on every call: it can be refreshed after a server restart.
     this.#llm = async (req) => {
       try {
-        return await createLlmClient(this.#token ?? token)(req);
+        return await createLlmClient(this.#token ?? token, undefined, onBudget)(req);
       } catch (err) {
         if (!/HTTP 401\b/.test(errMsg(err)) || !(await this.#refreshDemoToken())) throw err;
-        return createLlmClient(this.#token ?? token)(req);
+        return createLlmClient(this.#token ?? token, undefined, onBudget)(req);
       }
     };
     try {
@@ -359,8 +367,27 @@ export class SimController {
     void this.#speaker.speak(clean, 'alexa');
   }
 
+  /** The server answered with the offline fallback because a demo budget is spent: show the quiet note (once). */
+  #budget(kind: 'llm' | 'tts'): void {
+    if (this.#budgetSpent[kind]) return;
+    this.#budgetSpent = { ...this.#budgetSpent, [kind]: true };
+    this.#set({ budgetNote: budgetNote(this.#budgetSpent) });
+  }
+
   #onToolResult(name: string, outcome: ToolCallOutcome): void {
-    if (!outcome.ok) return;
+    if (!outcome.ok) {
+      // A refused place_call (off-hours, not in the directory, daily cap, setup failure): the card says so honestly.
+      const reason = name === TOOL_NAMES.placeCall && outcome.errorCode !== undefined ? refusalReason(outcome.errorCode) : undefined;
+      if (reason !== undefined) {
+        const message = maskText(outcome.error?.replace(/^[a-z_]+:\s*/, '') ?? 'The call was not placed.');
+        // A finished earlier call gives way to this refused attempt on the card.
+        const prev = this.#state.call?.status?.state;
+        const dropCall = prev !== undefined && TERMINAL_CALL_STATES.includes(prev);
+        this.#set({ refusal: { reason, message }, caseResult: toCallToolResult(outcome), ...(dropCall ? { call: undefined } : {}) });
+      }
+      return;
+    }
+    if (name === TOOL_NAMES.placeCall || name === TOOL_NAMES.openCase) this.#set({ refusal: undefined });
     if (name === TOOL_NAMES.openCase || name === TOOL_NAMES.updateCaseFact) {
       const r = (name === TOOL_NAMES.openCase ? OpenCaseOutputSchema : UpdateCaseFactOutputSchema).safeParse(outcome.structured);
       if (r.success) {
@@ -379,6 +406,9 @@ export class SimController {
     } else if (name === TOOL_NAMES.scheduleFollowup) {
       const r = ScheduleFollowupOutputSchema.safeParse(outcome.structured);
       if (r.success) void this.#watchForFollowupCall(r.data.job.caseId, r.data.job.runAt);
+    } else if (name === TOOL_NAMES.deleteCase) {
+      // The case (and its transcripts) is gone: drop it from the screen.
+      this.#set({ caseView: undefined, caseReady: false, caseResult: undefined, refusal: undefined });
     } else if (name === TOOL_NAMES.handoffToUser || name === TOOL_NAMES.endCall || name === TOOL_NAMES.sendToCall) {
       void this.pollNow();
     }

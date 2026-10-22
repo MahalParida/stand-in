@@ -8,7 +8,8 @@ import { BedrockProvider, type ConverseClient } from './llm/bedrock.js';
 import { LocalLlmProvider, type FetchLike } from './llm/localllm.js';
 import { ScriptedLlmProvider, defaultOfflineScript, type ScriptedLlmOptions } from './llm/scripted.js';
 import { DynamoRepo, createSqliteRepo } from './repo/index.js';
-import { LocalScheduler } from './scheduler/index.js';
+import { EventBridgeScheduler, type SchedulerClientLike } from './scheduler/eventbridge.js';
+import { LocalScheduler, type FollowupScheduler } from './scheduler/index.js';
 import { BrowserTts } from './tts/browser.js';
 import { PollyTts, type SynthesizeClient } from './tts/polly.js';
 
@@ -20,6 +21,7 @@ export interface ProviderOverrides {
   fetch?: FetchLike;
   bedrockClient?: ConverseClient;
   pollyClient?: SynthesizeClient;
+  schedulerClient?: SchedulerClientLike;
 }
 
 export interface Providers {
@@ -28,7 +30,8 @@ export interface Providers {
   llm: LlmProvider;
   tts: TtsProvider;
   repo: Repo;
-  scheduler: LocalScheduler;
+  /** Local ticker by default; EventBridge Scheduler only with STANDIN_MODE=aws and SCHEDULER=eventbridge. */
+  scheduler: FollowupScheduler;
   /** Stops the scheduler and closes the repo. */
   close(): void;
 }
@@ -75,13 +78,31 @@ export function createRepo(cfg: ProvidersEnv): Repo {
   return createSqliteRepo({ path: cfg.SQLITE_PATH });
 }
 
+/** The follow-up scheduler: EventBridge only when STANDIN_MODE=aws AND SCHEDULER=eventbridge, else the local ticker. */
+export function createScheduler(cfg: ProvidersEnv, repo: Repo, o: ProviderOverrides = {}): FollowupScheduler {
+  const clock = o.clock ?? systemClock;
+  if (cfg.STANDIN_MODE === 'aws' && cfg.SCHEDULER === 'eventbridge') {
+    // superRefine guarantees both ARNs are set in this combination.
+    return new EventBridgeScheduler({
+      region: cfg.AWS_REGION ?? '',
+      targetArn: cfg.SCHEDULER_TARGET_ARN ?? '',
+      roleArn: cfg.SCHEDULER_ROLE_ARN ?? '',
+      groupName: cfg.SCHEDULER_GROUP_NAME,
+      repo,
+      clock,
+      ...(o.schedulerClient !== undefined ? { client: o.schedulerClient } : {}),
+    });
+  }
+  return new LocalScheduler({ repo, clock });
+}
+
 export function createProviders(
   env: Record<string, string | undefined> = process.env,
   overrides: ProviderOverrides = {},
 ): Providers {
   const config = parseProvidersEnv(env);
   const repo = createRepo(config);
-  const scheduler = new LocalScheduler({ repo, clock: overrides.clock ?? systemClock });
+  const scheduler = createScheduler(config, repo, overrides);
   return {
     mode: config.STANDIN_MODE,
     config,

@@ -2,7 +2,7 @@
   "id": "S6",
   "name": "broken-promise",
   "description": "Call 1 gets SR-48213 due 29 Oct. Day N+1 the scheduled follow-up job calls again, quotes SR-48213 and gets escalated to a supervisor with a new SR id.",
-  "required": false,
+  "required": true,
   "business": { "preset": "happy-refund" },
   "followup": { "business": { "preset": "broken-promise" } },
   "case": {
@@ -19,6 +19,7 @@
     "no_never_leak",
     "followup_scheduled",
     "followup_quotes_ticket",
+    "asked_supervisor",
     "escalated"
   ]
 }

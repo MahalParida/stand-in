@@ -145,6 +145,14 @@ export const FailureReasonSchema = z.enum([
   'error',
   /** The server process ended while the call was live (recovered at the next start). */
   'server_restart',
+  /*
+   * Refused before dialling (place_call policy / setup). No call row carries
+   * these today; they let a host render a refusal as a FAILED card state.
+   */
+  'outside_calling_hours',
+  'not_allowlisted',
+  'daily_cap_reached',
+  'call_setup_failed',
 ]);
 export type FailureReason = z.infer<typeof FailureReasonSchema>;
 

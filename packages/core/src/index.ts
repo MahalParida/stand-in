@@ -7,3 +7,4 @@ export * from './interfaces.js';
 export * from './repo-types.js';
 export * from './policy.js';
 export * from './mcp-contract.js';
+export * from './failure-copy.js';

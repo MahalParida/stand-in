@@ -14,6 +14,7 @@ import {
 } from '@aws-sdk/client-bedrock-runtime';
 import {
   ChatRequestSchema,
+  MAX_LLM_OUTPUT_TOKENS,
   ToolChatRequestSchema,
   type ChatMessage,
   type ChatRequest,
@@ -36,6 +37,8 @@ export const BedrockOptionsSchema = z.object({
   region: z.string().min(1),
   modelId: z.string().min(1),
   timeoutMs: z.number().int().positive().default(30_000),
+  /** Hard ceiling on output tokens per request (cost guard); requests asking for more are clamped. */
+  maxOutputTokens: z.number().int().positive().max(MAX_LLM_OUTPUT_TOKENS).default(MAX_LLM_OUTPUT_TOKENS),
 });
 export type BedrockOptions = z.input<typeof BedrockOptionsSchema> & { client?: ConverseClient };
 
@@ -179,13 +182,15 @@ export class BedrockProvider implements LlmProvider {
   readonly modelId: string;
   readonly region: string;
   readonly timeoutMs: number;
+  readonly maxOutputTokens: number;
   readonly #client: ConverseClient;
 
   constructor(opts: BedrockOptions) {
-    const o = BedrockOptionsSchema.parse({ region: opts.region, modelId: opts.modelId, timeoutMs: opts.timeoutMs });
+    const o = BedrockOptionsSchema.parse({ region: opts.region, modelId: opts.modelId, timeoutMs: opts.timeoutMs, maxOutputTokens: opts.maxOutputTokens });
     this.modelId = o.modelId;
     this.region = o.region;
     this.timeoutMs = o.timeoutMs;
+    this.maxOutputTokens = o.maxOutputTokens;
     // Default credential chain (env, SSO/profile, instance/Lambda role). Never pass keys here.
     this.#client = opts.client ?? new BedrockRuntimeClient({ region: o.region });
   }
@@ -193,15 +198,14 @@ export class BedrockProvider implements LlmProvider {
   /** Native Converse tool use: the tools go in toolConfig, tool calls come back as toolUse blocks. */
   async chatWithTools(req: ToolChatRequest): Promise<ToolChatResult> {
     const r = ToolChatRequestSchema.parse(req);
-    const inferenceConfig: { temperature?: number; maxTokens?: number } = {};
+    const inferenceConfig: { temperature?: number; maxTokens: number } = { maxTokens: Math.min(r.maxTokens ?? this.maxOutputTokens, this.maxOutputTokens) };
     if (r.temperature !== undefined) inferenceConfig.temperature = r.temperature;
-    if (r.maxTokens !== undefined) inferenceConfig.maxTokens = r.maxTokens;
     const command = new ConverseCommand({
       modelId: this.modelId,
       messages: toConverseToolMessages(r.messages),
       ...(r.system.length > 0 ? { system: [{ text: r.system }] } : {}),
       toolConfig: { tools: toConverseTools(r.tools) },
-      ...(Object.keys(inferenceConfig).length > 0 ? { inferenceConfig } : {}),
+      inferenceConfig,
     });
     const out = await this.#send(command);
     const parsed = ConverseToolOutputSchema.safeParse(out);
@@ -238,15 +242,14 @@ export class BedrockProvider implements LlmProvider {
   async chat(req: ChatRequest): Promise<string> {
     const r = ChatRequestSchema.parse(req);
     const { system, messages } = toConverseInput(r.messages, r.json === true);
-    const inferenceConfig: { temperature?: number; maxTokens?: number } = {};
+    const inferenceConfig: { temperature?: number; maxTokens: number } = { maxTokens: Math.min(r.maxTokens ?? this.maxOutputTokens, this.maxOutputTokens) };
     if (r.temperature !== undefined) inferenceConfig.temperature = r.temperature;
-    if (r.maxTokens !== undefined) inferenceConfig.maxTokens = r.maxTokens;
 
     const command = new ConverseCommand({
       modelId: this.modelId,
       messages,
       ...(system.length > 0 ? { system } : {}),
-      ...(Object.keys(inferenceConfig).length > 0 ? { inferenceConfig } : {}),
+      inferenceConfig,
     });
 
     const out = await this.#send(command);

@@ -43,6 +43,7 @@ export const TOOL_NAMES = {
   getCase: 'get_case',
   listCases: 'list_cases',
   scheduleFollowup: 'schedule_followup',
+  deleteCase: 'delete_case',
 } as const;
 export type ToolName = (typeof TOOL_NAMES)[keyof typeof TOOL_NAMES];
 export const ToolNameSchema = z.enum(Object.values(TOOL_NAMES) as [ToolName, ...ToolName[]]);
@@ -329,6 +330,20 @@ export type ScheduleFollowupInput = z.infer<typeof ScheduleFollowupInputSchema>;
 export const ScheduleFollowupOutputSchema = z.object({ job: FollowupJobViewSchema });
 export type ScheduleFollowupOutput = z.infer<typeof ScheduleFollowupOutputSchema>;
 
+// delete_case (spec 13: per-case delete)
+export const DeleteCaseInputSchema = z.object(CaseIdInput);
+export type DeleteCaseInput = z.infer<typeof DeleteCaseInputSchema>;
+export const DeleteCaseOutputSchema = z.object({
+  caseId: Id,
+  deleted: z.boolean(),
+  /** Calls whose transcripts (event logs) were erased with the case. */
+  callsDeleted: z.number().int().nonnegative(),
+  /** Pending follow-up jobs cancelled with the case. */
+  followupsCancelled: z.number().int().nonnegative(),
+  message: ShortText,
+});
+export type DeleteCaseOutput = z.infer<typeof DeleteCaseOutputSchema>;
+
 /** Tool name -> {input, output} schemas. */
 export const TOOL_SCHEMAS = {
   open_case: { input: OpenCaseInputSchema, output: OpenCaseOutputSchema },
@@ -341,6 +356,7 @@ export const TOOL_SCHEMAS = {
   get_case: { input: GetCaseInputSchema, output: GetCaseOutputSchema },
   list_cases: { input: ListCasesInputSchema, output: ListCasesOutputSchema },
   schedule_followup: { input: ScheduleFollowupInputSchema, output: ScheduleFollowupOutputSchema },
+  delete_case: { input: DeleteCaseInputSchema, output: DeleteCaseOutputSchema },
 } as const satisfies Record<ToolName, { input: z.ZodType; output: z.ZodType }>;
 
 export type ToolInput<N extends ToolName> = z.input<(typeof TOOL_SCHEMAS)[N]['input']>;
@@ -407,10 +423,21 @@ export const LlmMessageSchema = z
 export type LlmMessage = z.infer<typeof LlmMessageSchema>;
 
 /** An MCP tool converted for the LLM (inputSchema = the MCP tool's JSON Schema). */
+/**
+ * Max serialized size of one tool's inputSchema (Stand-In's largest, open_case,
+ * is under 1 KB). Bounds what a public /sim/api/llm caller can make the server
+ * forward to a billed model as a tool spec.
+ */
+export const MAX_TOOL_INPUT_SCHEMA_CHARS = 4096;
+
 export const LlmToolSpecSchema = z.object({
   name: z.string().min(1).max(64),
   description: z.string().max(4000),
-  inputSchema: z.record(z.string(), z.unknown()),
+  inputSchema: z
+    .record(z.string(), z.unknown())
+    .refine((v) => JSON.stringify(v).length <= MAX_TOOL_INPUT_SCHEMA_CHARS, {
+      message: `inputSchema must serialize to at most ${MAX_TOOL_INPUT_SCHEMA_CHARS} characters`,
+    }),
 });
 export type LlmToolSpec = z.infer<typeof LlmToolSpecSchema>;
 
@@ -441,8 +468,14 @@ export const SimTtsVoiceSchema = z.enum(['alexa', ...TtsVoiceRoleSchema.options]
 export type SimTtsVoice = z.infer<typeof SimTtsVoiceSchema>;
 
 /** POST /sim/api/tts. Text must already be masked; the server DLP-checks it again before Polly. */
+/**
+ * Max text per /sim/api/tts request. Polly is billed per character, so this is
+ * sized to what the page speaks (one phone-line utterance), not a document.
+ */
+export const SIM_TTS_MAX_CHARS = 600;
+
 export const SimTtsRequestSchema = z.object({
-  text: z.string().min(1).max(3000),
+  text: z.string().min(1).max(SIM_TTS_MAX_CHARS),
   voice: SimTtsVoiceSchema,
 });
 export type SimTtsRequest = z.infer<typeof SimTtsRequestSchema>;

@@ -1,0 +1,37 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "BedrockConverseViaInferenceProfile",
+      "Effect": "Allow",
+      "Action": ["bedrock:InvokeModel"],
+      "Resource": ["arn:aws:bedrock:REGION:ACCOUNT_ID:inference-profile/INFERENCE_PROFILE_ID"]
+    },
+    {
+      "Sid": "BedrockConverseFoundationModelBehindProfile",
+      "Effect": "Allow",
+      "Action": ["bedrock:InvokeModel"],
+      "Resource": ["arn:aws:bedrock:*::foundation-model/FOUNDATION_MODEL_ID"],
+      "Condition": {
+        "StringEquals": {
+          "bedrock:InferenceProfileArn": "arn:aws:bedrock:REGION:ACCOUNT_ID:inference-profile/INFERENCE_PROFILE_ID"
+        }
+      }
+    },
+    {
+      "Sid": "BedrockConverseFoundationModelDirect",
+      "Effect": "Allow",
+      "Action": ["bedrock:InvokeModel"],
+      "Resource": ["arn:aws:bedrock:REGION::foundation-model/FOUNDATION_MODEL_ID"]
+    },
+    {
+      "Sid": "PollySynthesizeOnly",
+      "Effect": "Allow",
+      "Action": ["polly:SynthesizeSpeech"],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": { "aws:RequestedRegion": "REGION" }
+      }
+    }
+  ]
+}

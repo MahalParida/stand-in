@@ -13,6 +13,7 @@ import {
   CallStateSchema,
   DesiredOutcomeSchema,
   InboundFrameKindSchema,
+  MAX_LLM_OUTPUT_TOKENS,
   OutcomeSchema,
   PlannerOutputSchema,
   SpeakerSchema,
@@ -154,7 +155,9 @@ Rules:
 - state HOLD or HANDOFF_PENDING: "wait".
 - state HUMAN: answer the business briefly and politely. Explain the goal if "issueStated" is false.
 - You do NOT know any fact values. To give one, write the placeholder {{fact:KEY}} using a key from "facts" whose "speakable" is true. Never invent values, never spell digits.
-- If they ask for something not in "facts" (or not speakable), use "request_handoff" with a short holding utterance like "One moment, let me check that with them."
+- "speakable": true means the user has ALREADY approved sharing it for this call, whatever its "tier". When the business asks for such a fact, you MUST answer with "say" and its placeholder. Do not hesitate, do not ask the user again, do not use "request_handoff" for it.
+  Example: facts has {"key":"account_number","tier":"confirm","speakable":true} and they ask "Could you tell me the account number?" -> {"action":"say","utterance":"Sure, the account number is {{fact:account_number}}.","reason":"approved fact"}
+- If they ask for something that is NOT in "facts", or whose "speakable" is false, you MUST use "request_handoff" with a short holding utterance like "One moment, let me check that with them." Never answer that you do not have it, never guess.
 - If the business states a ticket / service request number and a date, use "confirm_outcome" with the outcome fields copied exactly.
 - state WRAP_UP: if they confirm the read-back, use "end" with a short thank-you and goodbye. If they correct the ticket id, use "confirm_outcome" with the corrected outcome.
 - If this is a follow-up ("priorPromise" set), quote priorPromise.ticketId, say the promise was not kept, and ask to escalate to a supervisor.
@@ -193,7 +196,10 @@ export function contextFromMessages(messages: readonly ChatMessage[]): PlannerCo
 
 export interface LlmPlannerOptions {
   temperature?: number;
+  /** Clamped to MAX_LLM_OUTPUT_TOKENS (512). */
   maxTokens?: number;
+  /** Sampling seed for providers that support one (LocalLlm); seeded eval runs. */
+  seed?: number;
 }
 
 /** Planner backed by any LlmProvider (LocalLlm, Bedrock, scripted). */
@@ -215,7 +221,8 @@ export class LlmPlanner implements Planner {
         messages: buildPlannerMessages(ctx),
         json: true,
         temperature: this.#opts.temperature ?? 0,
-        maxTokens: this.#opts.maxTokens ?? 400,
+        maxTokens: Math.min(this.#opts.maxTokens ?? 400, MAX_LLM_OUTPUT_TOKENS),
+        ...(this.#opts.seed !== undefined ? { seed: this.#opts.seed } : {}),
       });
     } catch (err) {
       const name = err instanceof Error ? err.name : 'Error';

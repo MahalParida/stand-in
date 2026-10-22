@@ -13,7 +13,10 @@
  * sent; bad model output falls back to the scripted matcher.
  */
 import {
+  MAX_LLM_OUTPUT_TOKENS,
   SimLlmResponseSchema,
+  failureCopy,
+  refusalReason,
   type CaseFact,
   type LlmProvider,
   type LlmToolCall,
@@ -50,12 +53,13 @@ interface ToolEvent {
   result: Json | undefined;
   isError: boolean;
   errorMessage?: string;
+  errorCode?: string;
 }
 
 const isObj = (v: unknown): v is Json => typeof v === 'object' && v !== null && !Array.isArray(v);
 const str = (v: unknown): string | undefined => (typeof v === 'string' && v.length > 0 ? v : undefined);
 
-function parseResult(content: string): { result: Json | undefined; isError: boolean; errorMessage?: string } {
+function parseResult(content: string): { result: Json | undefined; isError: boolean; errorMessage?: string; errorCode?: string } {
   let parsed: unknown;
   try {
     parsed = JSON.parse(content);
@@ -64,7 +68,10 @@ function parseResult(content: string): { result: Json | undefined; isError: bool
   }
   if (!isObj(parsed)) return { result: undefined, isError: true, errorMessage: 'the tool returned nothing useful' };
   const err = parsed.error;
-  if (isObj(err)) return { result: parsed, isError: true, errorMessage: str(err.message) ?? str(err.code) ?? 'the tool failed' };
+  if (isObj(err)) {
+    const code = str(err.code);
+    return { result: parsed, isError: true, errorMessage: str(err.message) ?? code ?? 'the tool failed', ...(code !== undefined ? { errorCode: code.slice(0, 64) } : {}) };
+  }
   // Tolerate a bare string error too: any `error` key means the tool failed.
   if (typeof err === 'string') return { result: parsed, isError: true, errorMessage: clip(err, 300) || 'the tool failed' };
   if (parsed.isError === true) {
@@ -159,6 +166,7 @@ type Intent =
   | { kind: 'status' }
   | { kind: 'followup' }
   | { kind: 'end' }
+  | { kind: 'delete' }
   | { kind: 'yes' }
   | { kind: 'no' }
   | { kind: 'other' };
@@ -168,6 +176,7 @@ const ACTIVE = new Set(['DIALING', 'IVR', 'HOLD', 'HUMAN', 'HANDOFF_PENDING', 'U
 export function classifyUtterance(text: string): Intent {
   const u = text.toLowerCase();
   if (/\b(hang up|end (the )?call|stop the call|cancel the call)\b/.test(u)) return { kind: 'end' };
+  if (/\b(delete|erase|forget|remove)\b/.test(u) && /\b(case|complaint|transcripts?|data|records?|history)\b/.test(u)) return { kind: 'delete' };
   if (/\b(never came|never showed|didn'?t come|did not come|not received|haven'?t received|still not|call (them|bharatnet)? ?again|follow[- ]?up|chase)\b/.test(u)) return { kind: 'followup' };
   if (/\b(what happened|status|any (news|update)|update on|how did it go|where are we)\b/.test(u)) return { kind: 'status' };
   const order = /\b(od\d{3,})\b/i.exec(text);
@@ -278,9 +287,14 @@ export function scriptedOrchestrator(req: SimLlmRequest, ctx: OrchestratorContex
   if (last?.role === 'tool') {
     const ev = events.at(-1);
     if (ev === undefined) return respond(FALLBACK_REPLY);
-    if (ev.isError) return respond(`Sorry, I couldn't do that: ${ev.errorMessage ?? 'something went wrong'}.`);
-    const r = ev.result ?? {};
     const biz = (id: string | undefined): string => (id !== undefined ? state.caseNames.get(id) : undefined) ?? state.kase?.businessName ?? defaultBusiness;
+    if (ev.isError) {
+      // A refused / failed call gets the specific, honest explanation (spec S5), not a generic error.
+      const reason = ev.errorCode === undefined ? undefined : refusalReason(ev.errorCode);
+      if (reason !== undefined) return respond(failureCopy(reason, { businessName: biz(str(ev.args.caseId)) }).message);
+      return respond(`Sorry, I couldn't do that: ${ev.errorMessage ?? 'something went wrong'}.`);
+    }
+    const r = ev.result ?? {};
     switch (ev.name) {
       case 'open_case':
       case 'update_case_fact': {
@@ -328,6 +342,8 @@ export function scriptedOrchestrator(req: SimLlmRequest, ctx: OrchestratorContex
       }
       case 'get_case':
         return respond(str(r.summary) ?? FALLBACK_REPLY);
+      case 'delete_case':
+        return respond(str(r.message) ?? "Done, I've deleted that case.");
       case 'schedule_followup': {
         const job = isObj(r.job) ? r.job : {};
         const runAt = Date.parse(str(job.runAt) ?? '');
@@ -406,6 +422,9 @@ export function scriptedOrchestrator(req: SimLlmRequest, ctx: OrchestratorContex
     case 'followup':
       if (k !== undefined && k.hasPromise) return respond(undefined, [call('schedule_followup', { caseId: k.id, at: new Date(ctx.now.getTime() + 3000).toISOString() })]);
       return respond(undefined, [call('list_cases', { limit: 5 })]);
+    case 'delete':
+      if (k !== undefined) return respond(undefined, [call('delete_case', { caseId: k.id })]);
+      return respond("I don't have a case open in this conversation to delete. Ask me about your case first, then ask me to delete it.");
     case 'end':
       return respond("There's no call in progress.");
     default:
@@ -432,6 +451,7 @@ Rules:
 - The device tracks the live call separately, so the call state in this conversation may be stale: when a call is active and the user replies (yes, no, a detail), call call_status first and act on what it returns.
 - When call_status shows pendingQuestion kind "fact", ask the user and pass their answer with send_to_call. Kind "handoff" (OTP, PIN) means only the user may answer: ask "Join the call?" and use handoff_to_user.
 - Never ask the user to tell you an OTP, PIN, password or card number.
+- When a tool refuses or a call fails, tell the user honestly and specifically what happened (use the error message or call_status summary), that nothing was dialled or confirmed when that is the case, and what they can do next. Never pretend a call succeeded.
 - Keep spoken replies to one or two short sentences.`;
 
 export const ORCHESTRATOR_SYSTEM_PROMPT = `${ORCHESTRATOR_RULES}
@@ -494,7 +514,7 @@ export function buildToolChatRequest(req: SimLlmRequest, never: readonly CaseFac
     messages,
     tools: req.tools.map((t) => ({ name: t.name, description: m(clip(t.description, 4000)), inputSchema: maskDeepJson(t.inputSchema, never) as Record<string, unknown> })),
     temperature: 0,
-    maxTokens: 800,
+    maxTokens: MAX_LLM_OUTPUT_TOKENS,
   };
 }
 
@@ -523,7 +543,7 @@ export async function llmOrchestrator(
   }
   let raw: string;
   try {
-    raw = await llm.chat({ messages: buildLlmMessages(req, ctx.never), json: true, temperature: 0, maxTokens: 800 });
+    raw = await llm.chat({ messages: buildLlmMessages(req, ctx.never), json: true, temperature: 0, maxTokens: MAX_LLM_OUTPUT_TOKENS });
   } catch {
     return fallback();
   }

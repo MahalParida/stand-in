@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { ToolErrorSchema, type LlmMessage, type LlmToolSpec, type SimLlmRequest, type SimLlmResponse } from '@standin/core';
-import { runTurn, trimHistory } from './orchestrator.js';
+import { budgetKind, budgetNote, createLlmClient, runTurn, trimHistory } from './orchestrator.js';
 import { toOutcome, toLlmToolSpecs, toolResultForLlm } from './mcp.js';
 import { mergeLines } from './lines.js';
 import { resolveToken, TOKEN_STORAGE_KEY, type StorageLike } from './config.js';
@@ -143,5 +143,30 @@ describe('resolveToken', () => {
     expect(resolveToken({ demoToken: 'demo' }, '', s)).toEqual({ token: 'demo', source: 'demo' });
     expect(resolveToken({}, '', s)).toEqual({ token: 'url', source: 'session' });
     expect(resolveToken({}, '', mem())).toBeUndefined();
+  });
+});
+
+describe('demo budget note (M5 daily spend caps)', () => {
+  const reply = (headers: Record<string, string>): Response =>
+    new Response(JSON.stringify({ text: 'Okay.' }), { status: 200, headers: { 'content-type': 'application/json', ...headers } });
+
+  it('createLlmClient reports a spent budget from the response header, and stays quiet otherwise', async () => {
+    const seen: string[] = [];
+    const ok = createLlmClient('t', async () => reply({}), (k) => seen.push(k));
+    const spent = createLlmClient('t', async () => reply({ 'x-standin-budget': 'llm-daily' }), (k) => seen.push(k));
+    const req: SimLlmRequest = { messages: [{ role: 'user', content: 'hi' }], tools };
+    expect((await ok(req)).text).toBe('Okay.');
+    expect(seen).toEqual([]);
+    expect((await spent(req)).text).toBe('Okay.');
+    expect(seen).toEqual(['llm']);
+  });
+
+  it('maps header values and words the note', () => {
+    expect(budgetKind(reply({ 'x-standin-budget': 'tts-hourly' }))).toBe('tts');
+    expect(budgetKind(reply({}))).toBeUndefined();
+    expect(budgetNote({ llm: false, tts: false })).toBeUndefined();
+    expect(budgetNote({ llm: true, tts: false })).toBe('Demo budget reached · using offline brain');
+    expect(budgetNote({ llm: false, tts: true })).toBe('Demo budget reached · using offline voice');
+    expect(budgetNote({ llm: true, tts: true })).toBe('Demo budget reached · using offline voice and brain');
   });
 });

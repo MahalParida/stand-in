@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { LlmProviderError, LlmTimeoutError } from './json.js';
-import { LocalLlmProvider, type FetchLike } from './localllm.js';
+import { OPENAI_REASONING_HEADROOM_TOKENS, LocalLlmProvider, type FetchLike } from './localllm.js';
 
 /** A synthetic never-tier-looking value; it must not appear in any error. */
 const SECRET = '482913';
@@ -117,5 +117,66 @@ describe('LocalLlmProvider', () => {
 
   it('rejects an invalid base URL at construction', () => {
     expect(() => new LocalLlmProvider({ baseUrl: 'not a url' })).toThrow();
+  });
+});
+
+describe('LocalLlmProvider openai dialect (eval-only fast path)', () => {
+  it('sends a Bearer key, max_completion_tokens and no reasoning_effort', async () => {
+    const m = mockFetch(() => completion('{"ok":true}'));
+    const p = new LocalLlmProvider({
+      dialect: 'openai',
+      baseUrl: 'https://api.openai.com/v1',
+      model: 'test-model',
+      apiKey: 'sk-test',
+      fetch: m.fetch,
+    });
+    expect(p.name).toBe('openai');
+    await p.chat({ messages: [{ role: 'user', content: 'reply in JSON' }], json: true, maxTokens: 300 });
+    const call = m.calls[0];
+    expect(call?.url).toBe('https://api.openai.com/v1/chat/completions');
+    expect((call?.init.headers as Record<string, string>).authorization).toBe('Bearer sk-test');
+    const body = JSON.parse(String(call?.init.body)) as Record<string, unknown>;
+    expect(body.max_completion_tokens).toBe(300);
+    expect(body).not.toHaveProperty('max_tokens');
+    expect(body).not.toHaveProperty('reasoning_effort');
+  });
+
+  it('reasoning models: sends reasoning_effort, omits temperature, adds completion headroom', async () => {
+    const m = mockFetch(() => completion('{}'));
+    const p = new LocalLlmProvider({ dialect: 'openai', model: 'm', apiKey: 'k', openaiReasoningEffort: 'minimal', fetch: m.fetch });
+    await p.chat({ messages: [{ role: 'user', content: 'json' }], temperature: 0, seed: 3, maxTokens: 400 });
+    const body = JSON.parse(String(m.calls[0]?.init.body)) as Record<string, unknown>;
+    expect(body.reasoning_effort).toBe('minimal');
+    expect(body).not.toHaveProperty('temperature');
+    expect(body.seed).toBe(3);
+    expect(body.max_completion_tokens).toBe(400 + OPENAI_REASONING_HEADROOM_TOKENS);
+  });
+
+  it('never echoes the API key in errors', async () => {
+    const m = mockFetch(() => new Response('bad key sk-test', { status: 401 }));
+    const p = new LocalLlmProvider({ dialect: 'openai', model: 'm', apiKey: 'sk-test', fetch: m.fetch });
+    const err = await p.chat({ messages: [{ role: 'user', content: 'hi' }] }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(LlmProviderError);
+    expect(String((err as Error).message)).not.toContain('sk-test');
+  });
+
+  it('keeps the localllm dialect unchanged: no auth header, reasoning_effort + max_tokens', async () => {
+    const m = mockFetch(() => completion('hi'));
+    await new LocalLlmProvider({ fetch: m.fetch }).chat({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 50 });
+    const body = JSON.parse(String(m.calls[0]?.init.body)) as Record<string, unknown>;
+    expect(body.reasoning_effort).toBe('none');
+    expect(body.max_tokens).toBe(50);
+    expect(m.calls[0]?.init.headers as Record<string, string>).not.toHaveProperty('authorization');
+  });
+});
+
+describe('LocalLlmProvider seed (seeded eval runs)', () => {
+  it('passes seed and temperature through, and omits seed when not given', async () => {
+    const m = mockFetch(() => completion('{}'));
+    const llm = new LocalLlmProvider({ fetch: m.fetch });
+    await llm.chat({ messages: [{ role: 'user', content: 'x' }], json: true, temperature: 0.3, seed: 4 });
+    await llm.chat({ messages: [{ role: 'user', content: 'x' }] });
+    expect(bodyOf(m.calls[0])).toMatchObject({ seed: 4, temperature: 0.3 });
+    expect(bodyOf(m.calls[1])).not.toHaveProperty('seed');
   });
 });

@@ -42,8 +42,9 @@ import {
 } from '@standin/fake-business';
 import { LocalScheduler, createSqliteRepo } from '@standin/providers';
 import type { BusinessSpec, PolicyAttempt, Scenario } from './scenarios.js';
+import { seedOverrides, seedVariation, type SeedVariation } from './seeds.js';
 
-export type LlmMode = 'scripted' | 'localllm' | 'bedrock';
+export type LlmMode = 'scripted' | 'localllm' | 'bedrock' | 'openai';
 
 /** Records every request sent to an LLM (for the never-tier leak check). */
 export class RecordingLlm implements LlmProvider {
@@ -94,6 +95,7 @@ export interface AttemptResult {
 export interface ScenarioRun {
   scenario: Scenario;
   seed: number;
+  variation: SeedVariation;
   llm: LlmMode;
   userName: string;
   neverValues: string[];
@@ -114,8 +116,17 @@ export interface RunOptions {
 
 const MAX_SIM_MS = 3 * 60 * 60 * 1000;
 
+/** The business for one scenario run: preset, then the seed's variation, then the scenario file's own overrides. */
 function businessScenario(spec: BusinessSpec, seed: number, secrets: string[]): FakeBusinessScenarioInput {
-  return presetScenario(spec.preset, { ...(spec.overrides as FakeBusinessScenarioInput), seed, secrets });
+  const own = spec.overrides as FakeBusinessScenarioInput;
+  const varied = seedOverrides(spec.preset, seedVariation(seed));
+  const merged: FakeBusinessScenarioInput = { ...varied, ...own };
+  for (const k of ['outcome', 'followup', 'adversarial', 'timing'] as const) {
+    const a = varied[k];
+    const b = own[k];
+    if (a !== undefined && b !== undefined) Object.assign(merged, { [k]: { ...a, ...b } });
+  }
+  return presetScenario(spec.preset, { ...merged, seed, secrets });
 }
 
 function buildFacts(sc: Scenario): CaseFact[] {
@@ -131,7 +142,10 @@ function makePlanner(sc: Scenario, opts: RunOptions, recorder: { llm?: Recording
   const rec = new RecordingLlm(base);
   recorder.llm = rec;
   const llm = sc.planner.garbage === undefined ? rec : new GarbageInjectingLlm(rec, sc.planner.garbage);
-  return new LlmPlanner(llm);
+  // A real model samples with the seed's temperature and seed (LocalLlm honours `seed`).
+  if (opts.llm === 'scripted') return new LlmPlanner(llm);
+  const v = seedVariation(opts.seed);
+  return new LlmPlanner(llm, { temperature: v.temperature, seed: opts.seed });
 }
 
 export async function runScenario(sc: Scenario, opts: RunOptions): Promise<ScenarioRun> {
@@ -141,6 +155,7 @@ export async function runScenario(sc: Scenario, opts: RunOptions): Promise<Scena
   const run: ScenarioRun = {
     scenario: sc,
     seed: opts.seed,
+    variation: seedVariation(opts.seed),
     llm: opts.llm,
     userName,
     neverValues,

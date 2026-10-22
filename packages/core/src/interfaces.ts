@@ -35,12 +35,20 @@ export const ChatMessageSchema = z.object({
 });
 export type ChatMessage = z.infer<typeof ChatMessageSchema>;
 
+/**
+ * Hard ceiling on model output tokens for the planner and the orchestrator
+ * (cost guard for the hosted demo). Providers clamp to it as well.
+ */
+export const MAX_LLM_OUTPUT_TOKENS = 512;
+
 export const ChatRequestSchema = z.object({
   messages: z.array(ChatMessageSchema).min(1),
   /** Ask the provider for a single JSON object (caller still validates with zod). */
   json: z.boolean().optional(),
   temperature: z.number().min(0).max(2).optional(),
   maxTokens: z.number().int().positive().optional(),
+  /** Sampling seed for providers that support one (LocalLlm); used by seeded eval runs. */
+  seed: z.number().int().min(0).max(0x7fff_ffff).optional(),
 });
 export type ChatRequest = z.infer<typeof ChatRequestSchema>;
 

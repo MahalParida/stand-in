@@ -2,7 +2,7 @@
   "id": "S4",
   "name": "unknown-fact",
   "description": "Ravi asks for the router serial number, which the case does not have. It is surfaced as pendingQuestion; the user's answer flows in via answerPending (send_to_call) and the agent gives it.",
-  "required": false,
+  "required": true,
   "business": { "preset": "unknown-fact" },
   "case": {
     "userName": "Asha Rao",

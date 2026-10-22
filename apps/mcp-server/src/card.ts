@@ -15,7 +15,21 @@
  * server; it is inserted with textContent, never as HTML.
  */
 
+import { FailureReasonSchema, failureCopy } from '@standin/core';
+
 export const MCP_APPS_PROTOCOL_VERSION = '2026-01-26' as const;
+
+/** Card headline per failure reason (the honest detail comes from the server's masked summary / error message). */
+const FAILURE_HEADLINES: Record<string, string> = Object.fromEntries(FailureReasonSchema.options.map((r) => [r, failureCopy(r).headline]));
+/** place_call refusal codes that render as a "not called" card instead of a small error line. */
+const REFUSAL_CODES: Record<string, string> = {
+  unknown_business: 'not_allowlisted',
+  business_opted_out: 'not_allowlisted',
+  not_allowlisted: 'not_allowlisted',
+  outside_calling_hours: 'outside_calling_hours',
+  daily_cap_reached: 'daily_cap_reached',
+  call_setup_failed: 'call_setup_failed',
+};
 
 export const CALL_CARD_HTML = String.raw`<!doctype html>
 <html lang="en">
@@ -90,7 +104,9 @@ label.approve { font-size: 13px; color: var(--muted); display: flex; gap: 6px; a
   'use strict';
   var STAGES = ['Preparing', 'Dialing', 'Menu', 'On hold', 'Talking', 'Needs you', 'Done'];
   var TERMINAL = { ENDED: true, FAILED: true };
-  var st = { caseView: null, missing: [], callId: null, status: null, timer: null, busy: false, error: '' };
+  var FAILURE_HEADLINES = ${JSON.stringify(FAILURE_HEADLINES)};
+  var REFUSAL_CODES = ${JSON.stringify(REFUSAL_CODES)};
+  var st = { caseView: null, missing: [], callId: null, status: null, timer: null, busy: false, error: '', refusal: null };
   var seq = 1, waiting = {};
 
   function post(msg) { try { window.parent.postMessage(msg, '*'); } catch (e) { /* standalone */ } }
@@ -127,15 +143,44 @@ label.approve { font-size: 13px; color: var(--muted); display: flex; gap: 6px; a
     return request('tools/call', { name: name, arguments: args }).then(function (res) { onResult(res, name); return res; });
   }
 
+  /** The spec-7 ToolError of an isError result: structuredContent, or the JSON text block the server sends. */
+  function toolError(res) {
+    var sc = res.structuredContent;
+    if (sc && sc.error && typeof sc.error === 'object') return sc.error;
+    var blocks = Array.isArray(res.content) ? res.content : [];
+    for (var i = 0; i < blocks.length; i++) {
+      var b = blocks[i];
+      if (!b || b.type !== 'text' || typeof b.text !== 'string') continue;
+      try {
+        var j = JSON.parse(b.text);
+        if (j && j.error && typeof j.error === 'object') return j.error;
+      } catch (e) { return { message: b.text.slice(0, 300) }; }
+    }
+    return {};
+  }
+
   function onResult(res, toolName) {
     if (!res || typeof res !== 'object') return;
     var sc = res.structuredContent;
     if (res.isError) {
-      st.error = sc && sc.error && sc.error.message ? sc.error.message : 'Something went wrong.';
+      var e = toolError(res);
+      var reason = typeof e.code === 'string' ? REFUSAL_CODES[e.code] : undefined;
+      if (reason && (toolName === 'place_call' || toolName === null)) {
+        // A refused call: an honest "not called" state, not a small red line.
+        st.refusal = { reason: reason, message: typeof e.message === 'string' && e.message ? e.message : 'The call was not placed.' };
+        st.error = '';
+        // The card now shows this refused attempt, not an earlier call.
+        if (st.timer) { clearInterval(st.timer); st.timer = null; }
+        st.callId = null;
+        st.status = null;
+      } else {
+        st.error = typeof e.message === 'string' && e.message ? e.message : 'Something went wrong.';
+      }
       render();
       return;
     }
     st.error = '';
+    if (toolName === 'place_call' || (sc && typeof sc.callId === 'string')) st.refusal = null;
     if (!sc || typeof sc !== 'object') return;
     if (sc.case && typeof sc.case === 'object') {
       st.caseView = sc.case;
@@ -192,6 +237,22 @@ label.approve { font-size: 13px; color: var(--muted); display: flex; gap: 6px; a
     var biz = (st.caseView && st.caseView.businessName) || 'Stand-In';
     document.getElementById('biz').textContent = biz;
     var badge = document.getElementById('badge');
+    if (st.refusal && !st.callId) {
+      badge.textContent = 'Not called';
+      badge.className = 'badge failed';
+      var steps0 = document.getElementById('steps');
+      clear(steps0);
+      for (var k = 0; k < STAGES.length; k++) { var b0 = el('span', k === 0 ? 'on' : ''); b0.title = STAGES[k]; steps0.appendChild(b0); }
+      var body0 = document.getElementById('body');
+      clear(body0);
+      body0.appendChild(el('p', 'title', FAILURE_HEADLINES[st.refusal.reason] || 'Call not placed'));
+      body0.appendChild(el('p', 'sub', st.refusal.message));
+      var err0 = document.getElementById('err');
+      err0.hidden = !st.error;
+      err0.textContent = st.error || '';
+      notify('ui/notifications/size-changed', { height: Math.ceil(document.documentElement.scrollHeight) });
+      return;
+    }
     badge.textContent = s && s.state === 'FAILED' ? 'Failed' : STAGES[stg];
     badge.className = 'badge' + (stg === 5 ? ' needs' : stg === 6 ? (s && s.state === 'FAILED' ? ' failed' : ' done') : '');
     var steps = document.getElementById('steps');
@@ -303,7 +364,8 @@ label.approve { font-size: 13px; color: var(--muted); display: flex; gap: 6px; a
 
   function renderDone(body, s) {
     if (s.state === 'FAILED') {
-      body.appendChild(el('p', 'title', 'Call failed'));
+      // Specific headline per reason; the detail is the server's honest, masked summary.
+      body.appendChild(el('p', 'title', (s.failureReason && FAILURE_HEADLINES[s.failureReason]) || 'Call failed'));
       body.appendChild(el('p', 'sub', s.summary || 'The call did not complete.'));
       return;
     }

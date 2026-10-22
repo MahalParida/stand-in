@@ -3,7 +3,7 @@
  * (Preparing -> Dialing -> Menu -> On hold -> Talking -> Needs you -> Done).
  * Used by the native React fallback card and by the device's ring overlay.
  */
-import type { CallLine, CallStatusOutput, PendingQuestionView } from '@standin/core';
+import { failureCopy, type CallLine, type CallStatusOutput, type FailureReason, type PendingQuestionView } from '@standin/core';
 
 export const CARD_STAGES = ['preparing', 'dialing', 'menu', 'hold', 'talking', 'needs_you', 'done'] as const;
 export type CardStage = (typeof CARD_STAGES)[number];
@@ -22,8 +22,10 @@ export type CardAction = 'join' | 'decline' | 'answer' | 'leave' | 'end';
 
 export interface CardView {
   stage: CardStage;
-  /** Terminal failure (FAILED): rendered as Done with an error style. */
+  /** Terminal failure (FAILED) or a refused place_call: rendered as Done with an error style. */
   failed: boolean;
+  /** Badge text override (e.g. "Not called" for a refused call). */
+  badge?: string;
   headline: string;
   detail?: string;
   digits: string[];
@@ -45,6 +47,8 @@ export interface CardContext {
   /** open_case returned and no required facts are missing. */
   caseReady?: boolean;
   businessName?: string;
+  /** place_call was refused before dialling (spec S5/S7): shown honestly instead of "Case ready". */
+  refusal?: { reason: FailureReason; message: string };
 }
 
 const LAST_LINES = 4;
@@ -52,6 +56,23 @@ const LAST_LINES = 4;
 /** Pure mapping; `status` undefined means no call has been placed yet. */
 export function mapCallStatus(status: CallStatusOutput | undefined, ctx: CardContext = {}): CardView {
   const business = ctx.businessName ?? 'the business';
+  if (status === undefined && ctx.refusal !== undefined) {
+    return {
+      stage: 'done',
+      failed: true,
+      badge: 'Not called',
+      headline: failureCopy(ctx.refusal.reason).headline,
+      detail: ctx.refusal.message,
+      digits: [],
+      holdSeconds: 0,
+      lines: [],
+      followupScheduled: false,
+      blockedCount: 0,
+      injectionCount: 0,
+      actions: [],
+      active: false,
+    };
+  }
   if (status === undefined) {
     return {
       stage: 'preparing',
@@ -134,7 +155,8 @@ export function mapCallStatus(status: CallStatusOutput | undefined, ctx: CardCon
         ...base,
         failed: true,
         stage: 'done',
-        headline: 'Call could not be completed',
+        // Specific per reason (ivr_dead_end, server_restart, carrier_error, ...); the detail is the honest summary.
+        headline: failureCopy(status.failureReason ?? 'error').headline,
         detail: status.summary,
         actions: [],
       });

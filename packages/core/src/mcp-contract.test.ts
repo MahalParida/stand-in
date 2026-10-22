@@ -16,6 +16,8 @@ import {
   SimLlmRequestSchema,
   SimLlmResponseSchema,
   SimTtsRequestSchema,
+  SIM_TTS_MAX_CHARS,
+  MAX_TOOL_INPUT_SCHEMA_CHARS,
   TOOL_NAMES,
   TOOL_SCHEMAS,
   ToolErrorSchema,
@@ -45,9 +47,10 @@ const caseView: CaseView = {
 };
 
 describe('mcp-contract names', () => {
-  it('lists all ten section-7 tools with schemas', () => {
+  it('lists the ten section-7 tools plus delete_case (spec 13) with schemas', () => {
     const names = Object.values(TOOL_NAMES);
-    expect(names).toHaveLength(10);
+    expect(names).toHaveLength(11);
+    expect(names).toContain('delete_case');
     expect(Object.keys(TOOL_SCHEMAS).sort()).toEqual([...names].sort());
   });
 
@@ -154,6 +157,17 @@ describe('sim host API', () => {
     expect(SimLlmResponseSchema.safeParse({}).success).toBe(false);
   });
 
+  it('refuses an oversized tool inputSchema (a public caller must not inflate billed tool specs)', () => {
+    const msg = [{ role: 'user', content: 'hi' }];
+    const ok = { name: 'open_case', description: 'x', inputSchema: { type: 'object' } };
+    expect(SimLlmRequestSchema.safeParse({ messages: msg, tools: [ok] }).success).toBe(true);
+    const huge = { ...ok, inputSchema: { type: 'object', description: 'x'.repeat(1_000_000) } };
+    expect(SimLlmRequestSchema.safeParse({ messages: msg, tools: [huge] }).success).toBe(false);
+    const edge = { ...ok, inputSchema: { d: 'x'.repeat(MAX_TOOL_INPUT_SCHEMA_CHARS - 8) } };
+    expect(JSON.stringify(edge.inputSchema).length).toBe(MAX_TOOL_INPUT_SCHEMA_CHARS);
+    expect(SimLlmRequestSchema.safeParse({ messages: msg, tools: [edge] }).success).toBe(true);
+  });
+
   it('enforces tool message pairing', () => {
     expect(SimLlmRequestSchema.safeParse({ messages: [{ role: 'tool', content: 'x' }], tools: [] }).success).toBe(false);
     expect(SimLlmRequestSchema.safeParse({ messages: [{ role: 'user', content: 'x', toolCallId: 't' }], tools: [] }).success).toBe(false);
@@ -164,6 +178,8 @@ describe('sim host API', () => {
     expect(SimTtsRequestSchema.safeParse({ text: 'Okay', voice: 'alexa' }).success).toBe(true);
     expect(SimTtsRequestSchema.safeParse({ text: 'Okay', voice: 'robot' }).success).toBe(false);
     expect(SimTtsRequestSchema.safeParse({ text: '', voice: 'standin' }).success).toBe(false);
+    expect(SimTtsRequestSchema.safeParse({ text: 'a'.repeat(SIM_TTS_MAX_CHARS), voice: 'standin' }).success).toBe(true);
+    expect(SimTtsRequestSchema.safeParse({ text: 'a'.repeat(SIM_TTS_MAX_CHARS + 1), voice: 'standin' }).success).toBe(false);
     expect(SimConfigSchema.safeParse({ mode: 'offline', llm: 'scripted', tts: 'browser' }).success).toBe(true);
     expect(SimConfigSchema.safeParse({ mode: 'aws', llm: 'bedrock', tts: 'polly', demoToken: 'tok' }).success).toBe(true);
     expect(SimConfigSchema.safeParse({ mode: 'cloud', llm: 'scripted', tts: 'browser' }).success).toBe(false);

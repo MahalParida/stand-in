@@ -1,0 +1,42 @@
+# Secrets: never send them to the build context.
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+
+# Dependencies and build output are produced inside the image.
+node_modules
+**/node_modules
+dist
+**/dist
+coverage
+**/coverage
+*.tsbuildinfo
+**/*.tsbuildinfo
+
+# Local databases
+*.db
+**/*.db
+*.db-journal
+*.db-wal
+*.db-shm
+**/*.db-journal
+**/*.db-wal
+**/*.db-shm
+
+# VCS, CI, editor, OS
+.git
+.github
+.vscode
+.idea
+.DS_Store
+**/.DS_Store
+
+# Deploy tooling and docs are not needed in the image
+scripts
+infra
+docs
+Dockerfile
+.dockerignore
+*.md

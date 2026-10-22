@@ -27,12 +27,13 @@ import {
   type TtsProvider,
 } from '@standin/core';
 import { scanOutbound } from '@standin/disclosure-guard';
-import { PollyTts, PollyVoiceSchema, type Providers } from '@standin/providers';
+import { LlmPlanner, createPolicyLlm } from '@standin/call-agent';
+import { PollyTts, PollyVoiceSchema, ScriptedLlmProvider, type Providers } from '@standin/providers';
 import type { ServerEnv } from './config.js';
 import { createMcpServer, SERVER_INFO, type McpSessionHandle } from './mcp.js';
 import { llmOrchestrator, scriptedOrchestrator, type DirectoryEntry } from './orchestrator.js';
 import { RateLimiter } from './rate-limit.js';
-import { boundModelRequest, WindowCap } from './sim-guard.js';
+import { BUDGET_HEADER, BudgetedLlm, UtcDayCap, WindowCap, boundModelRequest, takeBudget, takeBudgets } from './sim-guard.js';
 import { StandinApp } from './standin-app.js';
 import { guardFacts, maskText } from './views.js';
 
@@ -55,8 +56,10 @@ export interface StandinServerOptions {
   /** Business names/aliases for the scripted orchestrator (default: the app directory). */
   businesses?: DirectoryEntry[];
   log?: (line: string) => void;
-  /** Start the follow-up ticker (default true). */
+  /** Start the follow-up ticker and the transcript TTL purge (default true). */
   followups?: boolean;
+  /** Wall clock in ms for the daily budgets (tests). */
+  now?: () => number;
 }
 
 export interface StandinServer {
@@ -176,10 +179,18 @@ export function clientAddress(req: { headers: IncomingHttpHeaders; socket: { rem
 export function createStandinServer(opts: StandinServerOptions): StandinServer {
   const { env, providers } = opts;
   const log = opts.log ?? (() => undefined);
+  // Global LLM budget, shared by /sim/api/llm and the call planner (calls via /mcp).
+  const llmBudget = new WindowCap({ max: env.SIM_LLM_HOURLY_CAP, windowMs: 3_600_000 });
+  const llmDaily = new UtcDayCap({ max: env.SIM_LLM_DAILY_CAP, ...(opts.now !== undefined ? { now: opts.now } : {}) });
+  const meteredPlanner =
+    providers.llm instanceof ScriptedLlmProvider
+      ? undefined
+      : new LlmPlanner(new BudgetedLlm(providers.llm, { daily: llmDaily, hourly: llmBudget }, createPolicyLlm()));
   const app =
     opts.app ??
     new StandinApp({
       providers,
+      ...(meteredPlanner !== undefined ? { planner: meteredPlanner } : {}),
       defaultUserName: env.STANDIN_USER_NAME,
       speeds: { talk: env.SIM_SPEED_TALK, hold: env.SIM_SPEED_HOLD, handoff: env.SIM_SPEED_HANDOFF },
       join: { speakMs: env.SIM_JOIN_SPEAK_MS, leaveMs: env.SIM_JOIN_LEAVE_MS },
@@ -187,7 +198,10 @@ export function createStandinServer(opts: StandinServerOptions): StandinServer {
       dailyCallCap: env.STANDIN_DAILY_CALL_CAP,
       machine: { maxDurationMs: Math.round(env.MAX_CALL_MINUTES * 60_000) },
     });
-  if (opts.followups !== false) app.startFollowups(env.FOLLOWUP_TICK_MS);
+  if (opts.followups !== false) {
+    app.startFollowups(env.FOLLOWUP_TICK_MS);
+    app.startRetention({ ttlDays: env.TRANSCRIPT_TTL_DAYS, intervalMs: env.RETENTION_SWEEP_MS, log });
+  }
   const staticDir = resolve(opts.staticDir ?? env.ALEXA_SIM_DIST ?? DEFAULT_STATIC_DIR);
   const businesses: DirectoryEntry[] = opts.businesses ?? app.directory.filter((b) => b.optOut !== true).map((b) => ({ name: b.name, aliases: [] }));
   const tokenDigest = sha(env.STANDIN_TOKEN);
@@ -195,8 +209,10 @@ export function createStandinServer(opts: StandinServerOptions): StandinServer {
   // Cost guards for model-backed sim endpoints (see sim-guard.ts).
   const llmLimiter = new RateLimiter({ ratePerSec: env.SIM_LLM_RPS, burst: env.SIM_LLM_BURST });
   const ttsLimiter = new RateLimiter({ ratePerSec: env.SIM_TTS_RPS, burst: env.SIM_TTS_BURST });
-  const llmBudget = new WindowCap({ max: env.SIM_LLM_HOURLY_CAP, windowMs: 3_600_000 });
   const ttsBudget = new WindowCap({ max: env.SIM_TTS_HOURLY_CAP, windowMs: 3_600_000 });
+  const ttsDaily = new UtcDayCap({ max: env.SIM_TTS_DAILY_CAP, ...(opts.now !== undefined ? { now: opts.now } : {}) });
+  const ttsCharsHourly = new WindowCap({ max: env.SIM_TTS_HOURLY_CHAR_CAP, windowMs: 3_600_000 });
+  const ttsCharsDaily = new UtcDayCap({ max: env.SIM_TTS_DAILY_CHAR_CAP, ...(opts.now !== undefined ? { now: opts.now } : {}) });
   const sessions = new Map<string, Session>();
   const llmKind: SimConfig['llm'] = providers.mode === 'aws' ? 'bedrock' : providers.config.STANDIN_LLM;
   const ttsKind: SimConfig['tts'] = providers.mode === 'aws' ? 'polly' : 'browser';
@@ -253,7 +269,7 @@ export function createStandinServer(opts: StandinServerOptions): StandinServer {
     return {
       'access-control-allow-origin': origin,
       vary: 'Origin',
-      'access-control-expose-headers': 'Mcp-Session-Id, Mcp-Protocol-Version',
+      'access-control-expose-headers': 'Mcp-Session-Id, Mcp-Protocol-Version, X-Standin-Budget, X-Standin-Fallback',
     };
   };
 
@@ -410,9 +426,14 @@ export function createStandinServer(opts: StandinServerOptions): StandinServer {
     if (!modelBacked) return sendJson(res, 200, scriptedOrchestrator(parsed.data, ctx));
     const bounded = boundModelRequest(parsed.data);
     if (bounded === undefined) return sendJson(res, 400, { error: 'invalid_request' });
-    // Over the per-IP bucket or the global budget: no model call, the scripted matcher answers.
-    if (llmLimiter.take(clientIp(req)) > 0 || !llmBudget.take()) {
+    // Over the per-IP bucket or a global (daily / hourly) budget: no model call, the scripted matcher answers.
+    if (llmLimiter.take(clientIp(req)) > 0) {
       return sendJson(res, 200, scriptedOrchestrator(bounded, ctx), { 'x-standin-fallback': 'scripted-limit' });
+    }
+    const budget = takeBudget(llmDaily, llmBudget);
+    if (budget !== 'ok') {
+      if (budget === 'daily') log('sim llm: daily budget reached, scripted orchestrator until 00:00 UTC');
+      return sendJson(res, 200, scriptedOrchestrator(bounded, ctx), { 'x-standin-fallback': 'scripted-budget', [BUDGET_HEADER]: `llm-${budget}` });
     }
     const r = await llmOrchestrator(providers.llm, bounded, { ...ctx, never: await app.neverFacts() });
     return sendJson(res, 200, r.response, r.fallback ? { 'x-standin-fallback': 'scripted' } : {});
@@ -427,8 +448,8 @@ export function createStandinServer(opts: StandinServerOptions): StandinServer {
       res.end();
       return;
     }
-    // Over the per-IP bucket or the global budget: 204, the page uses browser speech.
-    if (ttsLimiter.take(clientIp(req)) > 0 || !ttsBudget.take()) {
+    // Over the per-IP bucket or a global (daily / hourly) budget: 204, the page uses browser speech.
+    if (ttsLimiter.take(clientIp(req)) > 0) {
       res.writeHead(204, { 'cache-control': 'no-store', 'x-standin-fallback': 'browser-limit' });
       res.end();
       return;
@@ -437,6 +458,20 @@ export function createStandinServer(opts: StandinServerOptions): StandinServer {
     const never = await app.neverFacts();
     const scan = scanOutbound(parsed.data.text, guardFacts(never));
     const text = scan.allowed ? parsed.data.text : maskText(parsed.data.text, never);
+    // Polly bills per character: meter requests and the characters actually sent.
+    const budget = takeBudgets(
+      [
+        { daily: ttsDaily, hourly: ttsBudget },
+        { daily: ttsCharsDaily, hourly: ttsCharsHourly },
+      ],
+      [1, text.length],
+    );
+    if (budget !== 'ok') {
+      if (budget === 'daily') log('sim tts: daily budget reached, browser speech until 00:00 UTC');
+      res.writeHead(204, { 'cache-control': 'no-store', 'x-standin-fallback': 'browser-budget', [BUDGET_HEADER]: `tts-${budget}` });
+      res.end();
+      return;
+    }
     const voice = parsed.data.voice;
     const tts = voice === 'alexa' ? alexaTts : providers.tts;
     if (tts === undefined) return sendJson(res, 502, { error: 'tts_unavailable' });

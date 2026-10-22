@@ -10,7 +10,8 @@ describe('@standin/eval scenarios', () => {
     const all = await loadScenarios();
     expect(all.map((s) => s.id)).toEqual(['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8']);
     const required = all.filter((s) => s.required).map((s) => s.id);
-    expect(required).toEqual(['S1', 'S2', 'S3', 'S5', 'S7', 'S8']);
+    // M5: S4 and S6 joined the gate, so `pnpm eval` must be 8/8 required.
+    expect(required).toEqual(['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8']);
     expect(all.find((s) => s.id === 'S4')?.user.answers).toBeDefined();
     expect(all.find((s) => s.id === 'S6')?.followup).toBeDefined();
     expect(all.find((s) => s.id === 'S7')?.policyAttempts?.some((a) => a.simulatedHourIst === 23)).toBe(true);

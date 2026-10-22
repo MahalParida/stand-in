@@ -188,3 +188,31 @@ describe('BedrockProvider.chatWithTools (native Converse tool use)', () => {
     expect((err as LlmProviderError).status).toBe(403);
   });
 });
+
+describe('BedrockProvider output-token cap (hosted demo cost guard)', () => {
+  it('clamps maxTokens to 512 and sets 512 when the caller gives none', async () => {
+    const fake = new FakeConverse(async () => output('ok'));
+    const llm = new BedrockProvider({ region: 'ap-south-1', modelId: 'm', client: fake });
+    expect(llm.maxOutputTokens).toBe(512);
+    await llm.chat({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 4000 });
+    await llm.chat({ messages: [{ role: 'user', content: 'hi' }] });
+    expect(fake.commands[0]?.input.inferenceConfig?.maxTokens).toBe(512);
+    expect(fake.commands[1]?.input.inferenceConfig?.maxTokens).toBe(512);
+  });
+
+  it('clamps native tool-use requests too', async () => {
+    const fake = new FakeConverse(async () => output('ok'));
+    const llm = new BedrockProvider({ region: 'ap-south-1', modelId: 'm', client: fake });
+    await llm.chatWithTools({
+      system: 's',
+      messages: [{ role: 'user', content: 'hi' }],
+      tools: [{ name: 'get_case', description: 'd', inputSchema: { type: 'object' } }],
+      maxTokens: 800,
+    });
+    expect(fake.commands[0]?.input.inferenceConfig?.maxTokens).toBe(512);
+  });
+
+  it('refuses a configured ceiling above 512', () => {
+    expect(() => new BedrockProvider({ region: 'ap-south-1', modelId: 'm', maxOutputTokens: 2048 })).toThrow();
+  });
+});

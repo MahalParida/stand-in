@@ -345,7 +345,7 @@ describe('Ravi lines vs the disclosure-guard classifier', () => {
     expect(classifyInbound(SECRET_LINES.sms_code).disclosureRequest).toEqual({ tier: 'never', what: 'otp' });
     expect(classifyInbound(SECRET_LINES.injection).injection).toBe(true);
     expect(classifyInbound(USER_VERIFY_LINE).disclosureRequest?.tier).toBe('never');
-  });
+  }, 20_000); // drives every preset (~2 s alone); the default 5 s is too tight under a full parallel `pnpm test`
 });
 
 describe('determinism', () => {

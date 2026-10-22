@@ -28,6 +28,10 @@ export type RepoKind = z.infer<typeof RepoKindSchema>;
 
 export const PollyVoiceSchema = z.enum(VoiceId);
 
+/** Follow-up scheduler. EventBridge is used only when STANDIN_MODE=aws as well. */
+export const SchedulerKindSchema = z.enum(['local', 'eventbridge']);
+export type SchedulerKind = z.infer<typeof SchedulerKindSchema>;
+
 export const ProvidersEnvSchema = z
   .object({
     STANDIN_MODE: withDefault(StandinModeSchema.default('offline')),
@@ -48,9 +52,23 @@ export const ProvidersEnvSchema = z
     POLLY_VOICE: withDefault(PollyVoiceSchema.default('Kajal')),
     POLLY_VOICE_IVR: withDefault(PollyVoiceSchema.default('Amy')),
     POLLY_VOICE_AGENT: withDefault(PollyVoiceSchema.default('Brian')),
+
+    /** local = SQLite jobs + in-process ticker (default in every mode); eventbridge = aws mode only. */
+    SCHEDULER: withDefault(SchedulerKindSchema.default('local')),
+    /** EventBridge Scheduler target (e.g. a Lambda that runs the follow-up) and the role it assumes. */
+    SCHEDULER_TARGET_ARN: optionalString,
+    SCHEDULER_ROLE_ARN: optionalString,
+    SCHEDULER_GROUP_NAME: withDefault(z.string().regex(/^[0-9a-zA-Z-_.]{1,64}$/).default('default')),
   })
   .superRefine((env, ctx) => {
     if (env.STANDIN_MODE !== 'aws') return;
+    if (env.SCHEDULER === 'eventbridge') {
+      for (const key of ['SCHEDULER_TARGET_ARN', 'SCHEDULER_ROLE_ARN'] as const) {
+        if (env[key] === undefined) {
+          ctx.addIssue({ code: 'custom', path: [key], message: `${key} is required when SCHEDULER=eventbridge` });
+        }
+      }
+    }
     if (env.AWS_REGION === undefined) {
       ctx.addIssue({ code: 'custom', path: ['AWS_REGION'], message: 'AWS_REGION is required when STANDIN_MODE=aws' });
     }

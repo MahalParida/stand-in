@@ -328,6 +328,13 @@ const CHECKS: Record<CheckName, Check> = {
     return quoted !== undefined ? ok(`follow-up said "${quoted.text.slice(0, 90)}..."`) : bad(`follow-up never quoted ${ticket}`);
   },
 
+  asked_supervisor: (run) => {
+    const second = run.calls[1];
+    if (second === undefined) return bad('follow-up call did not run');
+    const ask = said(second).find((s) => /\bsupervisor\b/i.test(s.text) || /\bescalat/i.test(s.text));
+    return ask !== undefined ? ok(`follow-up asked: "${ask.text.slice(0, 90)}..."`) : bad('follow-up never asked for a supervisor / escalation');
+  },
+
   escalated: (run) => {
     const first = run.calls[0];
     const second = run.calls[1];

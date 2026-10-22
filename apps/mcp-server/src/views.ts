@@ -5,6 +5,7 @@
 import type { CallSessionSnapshot, PendingQuestion } from '@standin/call-agent';
 import {
   CaseViewSchema,
+  failureCopy,
   type Business,
   type CallEvent,
   type CallLine,
@@ -203,16 +204,6 @@ export function pendingView(p: PendingQuestion | undefined, facts: readonly Case
   };
 }
 
-const FAILURE_TEXT: Record<FailureReason, string> = {
-  ivr_dead_end: "the phone menu kept looping and I couldn't reach a person",
-  max_duration: 'the call ran past the time limit',
-  remote_hangup: 'the business hung up',
-  dial_failed: "the call couldn't be connected",
-  carrier_error: 'the phone line failed',
-  error: 'something went wrong on the call',
-  server_restart: 'the Stand-In server restarted mid-call, so the call was dropped',
-};
-
 export function outcomeSentence(o: Outcome): string {
   const parts = [o.what];
   if (o.ticketId !== undefined) parts.push(`ticket ${o.ticketId}`);
@@ -282,7 +273,7 @@ export function callSummary(i: CallSummaryInput, facts: readonly CaseFact[]): st
       }
       break;
     case 'FAILED':
-      s = i.failureMessage ?? `The call to ${b} failed: ${FAILURE_TEXT[i.failureReason ?? 'error']}.`;
+      s = i.failureMessage ?? failureCopy(i.failureReason ?? 'error', { businessName: b }).message;
       break;
   }
   return clip(maskText(s, facts), 1000);

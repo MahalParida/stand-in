@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from 'vitest';
-import { CallStatusOutputSchema, type CallState, type CallStatusOutput } from '@standin/core';
+import { CallStatusOutputSchema, failureCopy, type CallState, type CallStatusOutput } from '@standin/core';
 import { CARD_STAGES, RACE_SCALE, autoHoldScale, formatHold, mapCallStatus, racingHoldSeconds, takeoverButton } from './call-card.js';
 
 const at = '2026-10-22T09:00:00.000Z';
@@ -112,6 +112,21 @@ describe('mapCallStatus', () => {
       }),
     );
     expect(v).toMatchObject({ stage: 'done', failed: true, detail: 'The phone menu kept looping, so I hung up.', active: false });
+    expect(v.headline).toBe('Stuck in the phone menu');
+  });
+
+  it('every FAILED reason gets its own headline (server_restart, carrier_error, ...)', () => {
+    expect(mapCallStatus(status('FAILED', { failureReason: 'server_restart', summary: 's' })).headline).toBe(failureCopy('server_restart').headline);
+    expect(mapCallStatus(status('FAILED', { failureReason: 'carrier_error', summary: 's' })).headline).toBe('Phone line failed');
+    expect(mapCallStatus(status('FAILED', { summary: 's' })).headline).toBe(failureCopy('error').headline);
+  });
+
+  it('a refused place_call (no call) renders an honest "Not called" card, not "Case ready"', () => {
+    for (const reason of ['outside_calling_hours', 'not_allowlisted', 'daily_cap_reached', 'call_setup_failed'] as const) {
+      const message = failureCopy(reason, { businessName: 'BharatNet Broadband' }).message;
+      const v = mapCallStatus(undefined, { caseReady: true, businessName: 'BharatNet Broadband', refusal: { reason, message } });
+      expect(v).toMatchObject({ stage: 'done', failed: true, badge: 'Not called', headline: failureCopy(reason).headline, detail: message, active: false, actions: [] });
+    }
   });
 
   it('passes the guard counters through', () => {

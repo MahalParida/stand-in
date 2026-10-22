@@ -13,7 +13,10 @@
     "test": "vitest run",
     "lint": "eslint .",
     "eval": "pnpm --filter @standin/eval run eval",
-    "demo": "pnpm --filter \"@standin/alexa-sim...\" --filter \"@standin/mcp-server...\" build && pnpm --filter @standin/mcp-server start:offline"
+    "verify": "tsx packages/core/src/verify-cli.ts",
+    "demo": "pnpm --filter \"@standin/alexa-sim...\" --filter \"@standin/mcp-server...\" build && pnpm --filter @standin/mcp-server start:offline",
+    "deploy:lightsail": "bash scripts/deploy-lightsail.sh",
+    "smoke:live": "bash scripts/smoke-live.sh"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

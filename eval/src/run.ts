@@ -2,29 +2,35 @@
  * `pnpm eval` — runs every golden scenario (data/scenarios) deterministically
  * and prints a pass/fail table with per-check details.
  *
- *   --llm scripted|localllm|bedrock   planner backend (default scripted: no LLM, deterministic)
- *   --seeds N                       run each scenario with seeds 1..N (default 1)
+ *   --llm scripted|localllm|bedrock|openai   planner backend (default scripted: no LLM, deterministic);
+ *                                   openai is an eval-only fast path (OPENAI_API_KEY, OPENAI_MODEL)
+ *   --seeds N                       run each scenario with seeds 1..N (default 1); see seeds.ts
+ *                                   for what a seed changes (wording, hold, ticket, temperature/seed)
  *   --scenario ID                   run only this scenario (e.g. S2); repeatable / comma-separated
  *
- * Exit code is non-zero if any of S1, S2, S3, S5, S7, S8 fail (any seed).
+ * Exit code (non-zero = gate failed):
+ *  - scripted planner: every required scenario (all 8 since M5) must pass on every seed;
+ *  - LLM planner: every seed must pass >= 7/8 scenarios (spec 9 target), and no
+ *    run may leak a never-tier value or crash, whatever the score.
  */
 import type { LlmProvider } from '@standin/core';
-import { ProvidersConfigError, createLlm, parseProvidersEnv } from '@standin/providers';
+import { LocalLlmProvider, ProvidersConfigError, createLlm, parseProvidersEnv } from '@standin/providers';
 import { z } from 'zod';
 import { runChecks, type CheckResult } from './checks.js';
 import { runScenario, type LlmMode } from './runner.js';
 import { loadScenarios, type Scenario } from './scenarios.js';
+import { describeVariation, seedVariation } from './seeds.js';
 
 const ArgsSchema = z.object({
-  llm: z.enum(['scripted', 'localllm', 'bedrock']).default('scripted'),
+  llm: z.enum(['scripted', 'localllm', 'bedrock', 'openai']).default('scripted'),
   seeds: z.coerce.number().int().min(1).max(50).default(1),
   scenario: z.array(z.string().regex(/^S\d+$/i)).default([]),
   verbose: z.boolean().default(false),
 });
 type Args = z.infer<typeof ArgsSchema>;
 
-/** The M2 gate. */
-export const REQUIRED_IDS = ['S1', 'S2', 'S3', 'S5', 'S7', 'S8'] as const;
+/** Spec 9 target with a real LLM: at least 7 of 8 scenarios per seed. */
+export const LLM_TARGET_FRACTION = 7 / 8;
 
 function parseArgs(argv: readonly string[]): Args {
   const raw: { llm?: string; seeds?: string; scenario: string[]; verbose?: boolean } = { scenario: [] };
@@ -60,8 +66,35 @@ function parseArgs(argv: readonly string[]): Args {
   return ArgsSchema.parse(raw);
 }
 
+const OpenAiEnvSchema = z.object({
+  OPENAI_API_KEY: z.string().min(1),
+  OPENAI_MODEL: z.string().min(1),
+  OPENAI_BASE_URL: z.url().default('https://api.openai.com/v1'),
+  /** For reasoning models (gpt-5 family); 'off' for non-reasoning models that accept temperature. */
+  OPENAI_REASONING_EFFORT: z.enum(['off', 'minimal', 'low', 'medium', 'high']).default('minimal'),
+});
+
 function makeLlm(mode: LlmMode): LlmProvider | undefined {
   if (mode === 'scripted') return undefined;
+  if (mode === 'openai') {
+    // Only this mode reads the repo .env (for OPENAI_*); other modes behave as before.
+    try {
+      process.loadEnvFile(new URL('../../.env', import.meta.url));
+    } catch {
+      // no .env: rely on the shell environment
+    }
+    const env = OpenAiEnvSchema.safeParse(process.env);
+    if (!env.success) {
+      throw new ProvidersConfigError(env.error.issues.map((i) => String(i.path[0])));
+    }
+    return new LocalLlmProvider({
+      dialect: 'openai',
+      baseUrl: env.data.OPENAI_BASE_URL,
+      model: env.data.OPENAI_MODEL,
+      apiKey: env.data.OPENAI_API_KEY,
+      ...(env.data.OPENAI_REASONING_EFFORT !== 'off' ? { openaiReasoningEffort: env.data.OPENAI_REASONING_EFFORT } : {}),
+    });
+  }
   const env =
     mode === 'localllm'
       ? { ...process.env, STANDIN_MODE: 'offline', STANDIN_LLM: 'localllm' }
@@ -86,7 +119,7 @@ async function main(): Promise<number> {
     args = parseArgs(process.argv.slice(2));
   } catch (err) {
     console.error(`eval: ${err instanceof Error ? err.message : String(err)}`);
-    console.error('usage: pnpm eval [--llm scripted|localllm|bedrock] [--seeds N] [--scenario S1,S2] [--verbose]');
+    console.error('usage: pnpm eval [--llm scripted|localllm|bedrock|openai] [--seeds N] [--scenario S1,S2] [--verbose]');
     return 2;
   }
 
@@ -126,7 +159,7 @@ async function main(): Promise<number> {
     }
   }
 
-  // Summary table.
+  // Per-scenario summary.
   console.log('\n| ID | Scenario | Required | Result | Checks |');
   console.log('|----|----------|----------|--------|--------|');
   let requiredFailed = 0;
@@ -135,16 +168,52 @@ async function main(): Promise<number> {
     const mine = rows.filter((r) => r.scenario.id === sc.id);
     const good = mine.filter((r) => r.pass).length;
     const allGood = good === mine.length;
-    const required = (REQUIRED_IDS as readonly string[]).includes(sc.id);
     if (allGood) passedScenarios++;
-    if (required && !allGood) requiredFailed++;
+    if (sc.required && !allGood) requiredFailed++;
     const checks = mine.reduce((n, r) => n + r.checks.filter((c) => c.pass).length, 0);
     const total = mine.reduce((n, r) => n + r.checks.length, 0);
     const result = args.seeds === 1 ? (allGood ? 'PASS' : 'FAIL') : `${good}/${mine.length} seeds`;
-    console.log(`| ${sc.id} | ${sc.name} | ${required ? 'yes' : 'no'} | ${result} | ${checks}/${total} |`);
+    console.log(`| ${sc.id} | ${sc.name} | ${sc.required ? 'yes' : 'no'} | ${result} | ${checks}/${total} |`);
   }
-  console.log(`\n${passedScenarios}/${wanted.length} scenarios passed${requiredFailed > 0 ? ` · ${requiredFailed} REQUIRED scenario(s) failed` : ' · all required scenarios passed'}`);
-  return requiredFailed > 0 ? 1 : 0;
+
+  // Per-seed table + aggregate (the spec 9 "≥7/8 over 5 seeds" view).
+  const target = Math.ceil(wanted.length * LLM_TARGET_FRACTION);
+  const seedRows: { seed: number; passed: number }[] = [];
+  if (args.seeds > 1 || args.llm !== 'scripted') {
+    console.log(`\n| Seed | ${wanted.map((s) => s.id).join(' | ')} | Passed | Target ≥${target}/${wanted.length} | Variation |`);
+    console.log(`|------|${wanted.map(() => '----').join('|')}|--------|--------|-----------|`);
+  }
+  for (let seed = 1; seed <= args.seeds; seed++) {
+    const mine = rows.filter((r) => r.seed === seed);
+    const passed = mine.filter((r) => r.pass).length;
+    seedRows.push({ seed, passed });
+    if (args.seeds > 1 || args.llm !== 'scripted') {
+      const cells = wanted.map((sc) => (mine.find((r) => r.scenario.id === sc.id)?.pass === true ? 'PASS' : 'FAIL'));
+      console.log(`| ${seed} | ${cells.join(' | ')} | ${passed}/${mine.length} | ${passed >= target ? 'met' : 'MISSED'} | ${describeVariation(seedVariation(seed))} |`);
+    }
+  }
+  const totalRuns = rows.length;
+  const totalPass = rows.filter((r) => r.pass).length;
+  const seedsMeeting = seedRows.filter((r) => r.passed >= target).length;
+  const worst = seedRows.reduce((m, r) => Math.min(m, r.passed), Number.POSITIVE_INFINITY);
+  const leaks = rows.filter((r) => r.checks.some((c) => c.name === 'no_never_leak' && !c.pass)).length;
+  const crashes = rows.filter((r) => r.checks.some((c) => c.name === 'no_crash' && !c.pass)).length;
+
+  console.log(
+    `\nAggregate: ${totalPass}/${totalRuns} runs passed · ${passedScenarios}/${wanted.length} scenarios passed on every seed · ` +
+      `${seedsMeeting}/${args.seeds} seed(s) met ≥${target}/${wanted.length} (worst seed ${Number.isFinite(worst) ? worst : 0}/${wanted.length}) · ` +
+      `never-tier leaks ${leaks} · crashes ${crashes}`,
+  );
+
+  let failed: boolean;
+  if (args.llm === 'scripted') {
+    failed = requiredFailed > 0;
+    console.log(failed ? `${requiredFailed} REQUIRED scenario(s) failed` : `all required scenarios passed (${wanted.filter((s) => s.required).length} required)`);
+  } else {
+    failed = seedsMeeting < args.seeds || leaks > 0 || crashes > 0;
+    console.log(failed ? 'LLM gate MISSED (every seed must reach the target, with no leak or crash)' : 'LLM gate met on every seed');
+  }
+  return failed ? 1 : 0;
 }
 
 process.exitCode = await main();

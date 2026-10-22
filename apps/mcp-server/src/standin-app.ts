@@ -30,7 +30,9 @@ import {
   BusinessDirectoryFileSchema,
   CaseFactSchema,
   CaseSchema,
+  failureCopy,
   isTerminal,
+  refusalReason,
   systemClock,
   type Business,
   type Call,
@@ -39,6 +41,7 @@ import {
   type CallState,
   type CallStatusOutput,
   type Case,
+  type DeleteCaseOutput,
   type CaseFact,
   type CaseView,
   type Clock,
@@ -57,6 +60,7 @@ import {
   type CaseStatus,
   type DesiredOutcome,
   type FactSource,
+  type FailureReason,
 } from '@standin/core';
 import { assignTier } from '@standin/disclosure-guard';
 import { FakeBusiness, type FakeBusinessScenario } from '@standin/fake-business';
@@ -149,10 +153,6 @@ interface LiveCall {
 const MAX_LIVE_CALLS = 500;
 const DAY_MS = 86_400_000;
 
-function errName(err: unknown): string {
-  return err instanceof Error ? err.name : 'error';
-}
-
 function normalizeName(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 }
@@ -219,11 +219,90 @@ export class StandinApp {
     }
   }
 
-  /** Starts the follow-up ticker (spec S6). */
+  /**
+   * Starts the follow-up ticker (spec S6): every due job places the follow-up
+   * call that quotes the ticket id and asks for a supervisor. With the
+   * EventBridge scheduler this is a no-op (the remote schedule fires the job).
+   */
   startFollowups(intervalMs: number): void {
     this.providers.scheduler.start(async (job) => {
       await this.runFollowupJob(job);
     }, intervalMs);
+  }
+
+  #retentionTimer: ReturnType<typeof setInterval> | undefined;
+
+  /**
+   * Transcript TTL (spec 13): purges cases (with their calls, transcripts and
+   * jobs) not updated for `ttlDays`, now and every `intervalMs`. Idempotent.
+   */
+  startRetention(opts: { ttlDays: number; intervalMs: number; log?: (line: string) => void }): void {
+    if (this.#retentionTimer !== undefined) return;
+    const sweep = (): void => {
+      void this.purgeExpired(opts.ttlDays)
+        .then((ids) => {
+          if (ids.length > 0) opts.log?.(`stand-in: retention purged ${ids.length} case(s) older than ${opts.ttlDays} days`);
+        })
+        .catch(() => opts.log?.('stand-in: retention purge failed; retrying on the next sweep'));
+    };
+    sweep();
+    this.#retentionTimer = setInterval(sweep, opts.intervalMs);
+    this.#retentionTimer.unref();
+  }
+
+  /**
+   * Deletes every case whose last update is older than `ttlDays` (and that has
+   * no live call or pending follow-up). Returns the deleted case ids.
+   */
+  async purgeExpired(ttlDays: number): Promise<string[]> {
+    const cutoff = this.#clock.now().getTime() - ttlDays * DAY_MS;
+    const out: string[] = [];
+    for (const kase of await this.repo.listCases()) {
+      if (Date.parse(kase.updatedAt) >= cutoff) continue;
+      if (this.#inflight.has(kase.id) || [...this.#calls.values()].some((c) => c.caseId === kase.id && c.final === undefined)) continue;
+      const jobs = await this.providers.scheduler.list(kase.id);
+      if (jobs.some((j) => j.status === 'pending' || j.status === 'running')) continue;
+      if (await this.#erase(kase.id)) out.push(kase.id);
+    }
+    return out;
+  }
+
+  /** Removes a case, its calls, transcripts (event logs) and jobs from storage and memory. */
+  async #erase(caseId: string): Promise<boolean> {
+    const deleted = await this.repo.deleteCase(caseId);
+    this.#scenarioByCase.delete(caseId);
+    for (const [id, c] of this.#calls) if (c.caseId === caseId) this.#calls.delete(id);
+    if (deleted) this.#emit({ caseId });
+    return deleted;
+  }
+
+  /**
+   * Per-case delete (spec 13). Refused while a call for the case is live (end
+   * it first); pending follow-ups are cancelled, then the case, its calls and
+   * their transcripts are erased.
+   */
+  async deleteCase(caseId: string): Promise<DeleteCaseOutput> {
+    const kase = await this.#case(caseId);
+    const live = [...this.#calls.values()].some((c) => c.caseId === caseId && c.final === undefined && !isTerminal(c.session.state));
+    if (live || this.#inflight.has(caseId)) {
+      throw new ToolFailure('call_in_progress', 'A call for this case is in progress. End the call first, then delete the case.');
+    }
+    const calls = await this.repo.listCallsByCase(caseId);
+    let followupsCancelled = 0;
+    for (const j of await this.providers.scheduler.list(caseId)) {
+      if (j.status === 'pending' && (await this.providers.scheduler.cancel(j.id))) followupsCancelled++;
+    }
+    const deleted = await this.#erase(caseId);
+    const name = this.#business(kase.businessId)?.name ?? 'the business';
+    return {
+      caseId,
+      deleted,
+      callsDeleted: calls.length,
+      followupsCancelled,
+      message: deleted
+        ? `Deleted your case with ${name}, ${calls.length} call transcript(s)${followupsCancelled > 0 ? ` and ${followupsCancelled} scheduled follow-up(s)` : ''}.`
+        : 'That case was already deleted.',
+    };
   }
 
   /**
@@ -234,6 +313,8 @@ export class StandinApp {
   async close(timeoutMs = 2000): Promise<void> {
     this.#closed = true;
     this.providers.scheduler.stop();
+    if (this.#retentionTimer !== undefined) clearInterval(this.#retentionTimer);
+    this.#retentionTimer = undefined;
     const pending: Promise<unknown>[] = [];
     for (const c of this.#calls.values()) {
       if (c.final === undefined) {
@@ -461,7 +542,7 @@ export class StandinApp {
   #caseSummary(
     kase: Case,
     business: Business | undefined,
-    lastCall: { state: CallState; outcome?: Outcome; failureReason?: string } | undefined,
+    lastCall: { state: CallState; outcome?: Outcome; failureReason?: FailureReason } | undefined,
     jobs: Job[],
     missing: MissingFact[],
   ): string {
@@ -491,7 +572,7 @@ export class StandinApp {
         s = `Your case with ${b} is resolved.`;
         break;
       case 'failed':
-        s = `The last call to ${b} failed${lastCall?.failureReason !== undefined ? ` (${lastCall.failureReason.replace(/_/g, ' ')})` : ''}.`;
+        s = `The last call didn't work out. ${failureCopy(lastCall?.failureReason ?? 'error', { businessName: b }).message}`;
         break;
     }
     return clip(maskText(s, kase.facts), 1000);
@@ -559,17 +640,20 @@ export class StandinApp {
             return carrier;
           },
         });
+        const businessName = this.#business(kase.businessId)?.name;
         let r: PlaceCallResult;
         try {
           r = await place(svc);
-        } catch (err) {
+        } catch {
           paced.stop();
-          throw new ToolFailure('call_setup_failed', `could not set up the call (${errName(err)})`);
+          throw new ToolFailure('call_setup_failed', failureCopy('call_setup_failed', { businessName }).message);
         }
         if (!r.ok) {
           paced.stop();
           carrier?.close();
-          throw new ToolFailure(r.code, r.message);
+          // Refusals the user must hear about get the shared, specific copy (spec S5); the code is kept.
+          const reason = refusalReason(r.code);
+          throw new ToolFailure(r.code, reason !== undefined ? failureCopy(reason, { businessName }).message : r.message);
         }
         const business = r.session.business;
         const live: LiveCall = {

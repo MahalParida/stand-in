@@ -20,6 +20,7 @@ import {
   PlannerOutputSchema,
   createCallSnapshot,
   factKeyEmbedsNeverValue,
+  failureCopy,
   isTerminal,
   systemClock,
   transition,
@@ -563,7 +564,9 @@ export class CallSession {
 
   #append(type: CallEventType, data: unknown): void {
     const id = `${this.callId}-e${String(++this.#seq).padStart(4, '0')}`;
-    const e = this.#log.append({ id, at: this.#clock.now().toISOString(), type, data });
+    // Masked at write (spec 4/13): every string in the event goes through guard.mask before it is
+    // hashed and stored, so a never-tier value cannot reach the stored transcript by any path.
+    const e = this.#log.append({ id, at: this.#clock.now().toISOString(), type, data: this.#maskDeep(data) });
     const sink = this.#onEvent;
     if (sink !== undefined) {
       this.#persist = this.#persist.then(async () => {
@@ -587,6 +590,24 @@ export class CallSession {
   /** A fact key as it may be stored or shown to the planner: one that embeds a never value is masked. */
   #safeKey(key: string): string {
     return safeFactKeys([{ key, label: key, value: '', tier: 'share', approved: false, source: 'call' }, ...this.#facts])[0]?.key === key ? key : '•••';
+  }
+
+  #maskOutcome(o: Outcome): Outcome {
+    const out: Outcome = { what: this.#mask(o.what) };
+    if (o.ticketId !== undefined) out.ticketId = this.#mask(o.ticketId);
+    if (o.dueBy !== undefined) out.dueBy = this.#mask(o.dueBy);
+    if (o.agentName !== undefined) out.agentName = this.#mask(o.agentName);
+    return out;
+  }
+
+  /** Deep copy of a JSON-like event payload with every string masked. Non-JSON leaves pass through. */
+  #maskDeep(v: unknown, depth = 0): unknown {
+    if (typeof v === 'string') return v.length === 0 ? v : this.#mask(v);
+    if (depth > 16 || v === null || typeof v !== 'object') return v;
+    if (Array.isArray(v)) return v.map((x) => this.#maskDeep(x, depth + 1));
+    const out: Record<string, unknown> = {};
+    for (const [k, x] of Object.entries(v)) out[k] = this.#maskDeep(x, depth + 1);
+    return out;
   }
 
   #mask(text: string): string {
@@ -669,7 +690,8 @@ export class CallSession {
           await this.#say(readBackLine(eff.outcome), 'read_back');
           break;
         case 'record_outcome':
-          this.#outcome = { ...eff.outcome };
+          // Masked: the outcome becomes a stored call row and case promise (spec 13).
+          this.#outcome = this.#maskOutcome(eff.outcome);
           this.#append('outcome', { status: 'promised', outcome: eff.outcome });
           break;
         case 'hangup':
@@ -712,22 +734,11 @@ export class CallSession {
   }
 
   #failureText(reason: FailureReason): string {
-    const n = this.business.name;
-    switch (reason) {
-      case 'ivr_dead_end':
-        return `I couldn't reach a person at ${n}: their phone menu kept sending me back to the start (${this.#snap.ivrLoops} loops), so I hung up. Nothing was shared and no request was raised.`;
-      case 'max_duration':
-        return `The call to ${n} ran past the ${Math.round(this.#snap.config.maxDurationMs / 60_000)}-minute limit, so I hung up without a resolution.`;
-      case 'remote_hangup':
-        return `${n} hung up before giving a resolution. No request was confirmed.`;
-      case 'dial_failed':
-        return `I couldn't connect to ${n}.`;
-      case 'carrier_error':
-      case 'error':
-        return `Something went wrong on the line with ${n}, so the call was stopped. No request was confirmed.`;
-      case 'server_restart':
-        return `The call to ${n} was dropped because Stand-In restarted. No request was confirmed.`;
-    }
+    return failureCopy(reason, {
+      businessName: this.business.name,
+      ivrLoops: this.#snap.ivrLoops,
+      maxMinutes: Math.round(this.#snap.config.maxDurationMs / 60_000),
+    }).message;
   }
 
   #clearHandoffTimer(): void {

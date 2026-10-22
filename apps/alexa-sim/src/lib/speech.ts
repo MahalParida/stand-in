@@ -4,7 +4,7 @@
  * a 204 (offline) or any failure falls back to browser speechSynthesis.
  * All text is masked again before it is spoken or sent.
  */
-import { SIM_PATHS, SimTtsRequestSchema, type SimTtsVoice } from '@standin/core';
+import { SIM_PATHS, SIM_TTS_MAX_CHARS, SimTtsRequestSchema, type SimTtsVoice } from '@standin/core';
 import { maskText } from './redact.js';
 
 interface VoiceStyle {
@@ -32,9 +32,13 @@ export class Speaker {
   #generation = 0;
   #audio: HTMLAudioElement | undefined;
 
-  constructor(mode: SpeakerMode, token: () => string | undefined) {
+  readonly #onBudget: (() => void) | undefined;
+
+  /** `onBudget`: the server said the demo's Polly budget is spent (204 + budget header); browser speech is used. */
+  constructor(mode: SpeakerMode, token: () => string | undefined, onBudget?: () => void) {
     this.#mode = mode;
     this.#token = token;
+    this.#onBudget = onBudget;
   }
 
   get muted(): boolean {
@@ -75,7 +79,7 @@ export class Speaker {
 
   async #playPolly(text: string, voice: SimTtsVoice, gen: number): Promise<boolean> {
     const token = this.#token();
-    const body = SimTtsRequestSchema.safeParse({ text: text.slice(0, 3000), voice });
+    const body = SimTtsRequestSchema.safeParse({ text: text.slice(0, SIM_TTS_MAX_CHARS), voice });
     if (token === undefined || !body.success) return false;
     try {
       const res = await fetch(SIM_PATHS.tts, {
@@ -83,6 +87,7 @@ export class Speaker {
         headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
         body: JSON.stringify(body.data),
       });
+      if (res.status === 204 && res.headers.get('x-standin-budget') !== null) this.#onBudget?.();
       if (res.status === 204 || !res.ok) return false;
       const blob = await res.blob();
       if (gen !== this.#generation) return true;

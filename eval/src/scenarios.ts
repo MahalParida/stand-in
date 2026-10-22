@@ -93,6 +93,7 @@ export const CheckNameSchema = z.enum([
   'fallback_spoken',
   'no_crash',
   'followup_quotes_ticket',
+  'asked_supervisor',
   'escalated',
 ]);
 export type CheckName = z.infer<typeof CheckNameSchema>;

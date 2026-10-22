@@ -96,8 +96,24 @@ async function executeToolCall(call: LlmToolCall, known: ReadonlySet<string>, de
   }
 }
 
+/** Header the server sets when a global demo budget (daily / hourly) is spent and the offline fallback answered. */
+export const BUDGET_HEADER = 'x-standin-budget';
+
+/** Which budget a response says is spent: 'llm' | 'tts', or undefined. */
+export function budgetKind(res: Pick<Response, 'headers'>): 'llm' | 'tts' | undefined {
+  const v = res.headers.get(BUDGET_HEADER);
+  if (v === null) return undefined;
+  if (v.startsWith('llm')) return 'llm';
+  if (v.startsWith('tts')) return 'tts';
+  return undefined;
+}
+
 /** POST /sim/api/llm with the Bearer token; response validated with zod. */
-export function createLlmClient(token: string, fetchImpl: typeof fetch = (u, i) => fetch(u, i)): LlmFn {
+export function createLlmClient(
+  token: string,
+  fetchImpl: typeof fetch = (u, i) => fetch(u, i),
+  onBudget?: (kind: 'llm' | 'tts') => void,
+): LlmFn {
   return async (req) => {
     const res = await fetchImpl(SIM_PATHS.llm, {
       method: 'POST',
@@ -105,6 +121,15 @@ export function createLlmClient(token: string, fetchImpl: typeof fetch = (u, i) 
       body: JSON.stringify(req),
     });
     if (!res.ok) throw new Error(`LLM proxy -> HTTP ${res.status}`);
+    const kind = budgetKind(res);
+    if (kind !== undefined) onBudget?.(kind);
     return SimLlmResponseSchema.parse(await res.json());
   };
+}
+
+/** The small, quiet note shown when the hosted demo's model / Polly budget is spent. */
+export function budgetNote(spent: { llm: boolean; tts: boolean }): string | undefined {
+  if (!spent.llm && !spent.tts) return undefined;
+  const what = spent.llm && spent.tts ? 'offline voice and brain' : spent.llm ? 'offline brain' : 'offline voice';
+  return `Demo budget reached · using ${what}`;
 }

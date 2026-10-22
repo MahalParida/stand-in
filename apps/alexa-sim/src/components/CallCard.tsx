@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { CallStatusOutput } from '@standin/core';
+import type { CallStatusOutput, FailureReason } from '@standin/core';
 import { CARD_STAGES, STAGE_LABEL, mapCallStatus, stageIndex, type CardView } from '../lib/call-card.js';
 import { attachCardBridge, type CallToolResultLike, type CardBridgeHandle } from '../lib/card-bridge.js';
 import { SPEAKER_LABEL } from '../lib/lines.js';
@@ -24,6 +24,8 @@ interface Props {
   /** Latest open_case / update_case_fact result, forwarded to the MCP App card. */
   caseResult: CallToolResultLike | undefined;
   businessName: string | undefined;
+  /** place_call refused before dialling (shown honestly on the native card; the MCP App card gets the tool error). */
+  refusal?: { reason: FailureReason; message: string } | undefined;
   holdScale: HoldScaleSetting;
   actions: CardActions;
   onCardToolResult(): void;
@@ -61,6 +63,7 @@ export function CallCard(props: Props) {
           view={mapCallStatus(props.status, {
             caseReady: props.caseReady,
             ...(props.businessName !== undefined ? { businessName: props.businessName } : {}),
+            ...(props.refusal !== undefined ? { refusal: props.refusal } : {}),
           })}
           polledAt={props.polledAt}
           holdScale={props.holdScale}
@@ -153,7 +156,7 @@ export function NativeCallCard({ view, polledAt, holdScale, actions }: NativePro
         ))}
       </ol>
       <div className="ncard-head">
-        <span className="ncard-badge">{view.failed ? 'Failed' : STAGE_LABEL[view.stage]}</span>
+        <span className="ncard-badge">{view.badge ?? (view.failed ? 'Failed' : STAGE_LABEL[view.stage])}</span>
         <h3>{view.headline}</h3>
       </div>
       {view.stage === 'menu' && view.digits.length > 0 && (
