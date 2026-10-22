@@ -44,7 +44,7 @@ answers and every trace payload.
 - It types the storyboard lines from §11.
 - It answers the account-number elicitation and the mid-call account-number question with the fictional `BN7781234`.
 - When the call needs you, it joins, and leaves about 3 s later if the server has not already handed back.
-- The followup take also shows a "Two days later…" banner.
+- The followup take also shows an "A week later…" banner.
 - The hold timer "races" ("38:12 on hold"). Use `?holdScale=<n>` to set a fixed factor. By default the scale is chosen automatically from how fast `holdSeconds` advances.
 - **Reset take** ends the call, closes the MCP session and reloads the page.
 

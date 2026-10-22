@@ -1,8 +1,27 @@
-# @standin/disclosure-guard
+# disclosure-guard
+
+![tests: 297 passing](https://img.shields.io/badge/tests-297%20passing-brightgreen) ![license: MIT](https://img.shields.io/badge/license-MIT-blue) ![node: >=22](https://img.shields.io/badge/node-%3E%3D22-informational)
+
+<!-- Badge text is static. Update the test count from `npm test` when tests change. TODO: swap for the CI status badge once the repo exists: <REPO_URL>/actions/workflows/ci.yml/badge.svg -->
 
 A disclosure guard for voice agents that call businesses for a user, written as code rather than as a prompt. It keeps one-time passwords, PINs, CVVs, card numbers, passwords and Aadhaar numbers from being spoken, even when the LLM tries to say them. It also treats everything the other party says as untrusted input.
 
-Part of [Stand-In](../../STAND-IN-BUILD-PLAN.md). The package stands alone: its only runtime dependency is `zod`. It is MIT licensed.
+The npm package name is `@standin/disclosure-guard`. It was extracted from [Stand-In](<STANDIN_REPO_URL>), an Alexa+ add-on that makes customer-care calls for a user, where every outbound utterance passes through this package before text-to-speech. It has one runtime dependency (`zod`), no network or file I/O, and is MIT licensed.
+
+## Install
+
+> TODO: not yet published to npm. Until it is, install from the Git repository.
+
+```sh
+# from Git: npm runs the `prepare` script, which builds dist/ from source
+# (TypeScript is a devDependency, so npm installs it for that step)
+npm install git+<REPO_URL>.git
+
+# after an npm release
+npm install @standin/disclosure-guard
+```
+
+Requires Node.js 22 or later. The package is ESM-only and ships its own TypeScript types.
 
 ## Why
 
@@ -132,6 +151,10 @@ Recommended policy:
 
 Replaces `never` values and every DLP pattern hit with `•••` before a transcript is stored. Use it on both sides of the call, since the callee may read out an OTP.
 
+### `isSpeakable(fact) → boolean`
+
+`true` for a `share` fact, or a `confirm` fact with `approved: true`. Use it to build the list of keys a planner may reference.
+
 ### `luhnValid(digits) → boolean`
 
 The Luhn (mod 10) checksum, exported for reuse.
@@ -189,9 +212,19 @@ mask('Your OTP is 482911, ticket SR-48211', facts);
 ## Development
 
 ```sh
-pnpm --filter @standin/disclosure-guard build
-pnpm vitest run packages/disclosure-guard
+npm install
+npm run build      # tsc -> dist/
+npm test           # vitest: 297 passed, 1 skipped (the monorepo-only tsconfig check)
+npm run typecheck  # library sources, then tests and fixtures (tsconfig.test.json)
 ```
+
+Inside the Stand-In monorepo the same scripts work through pnpm (`pnpm --filter @standin/disclosure-guard test`). `tsconfig.standalone.json` holds the full compiler options so the package builds without the monorepo's `tsconfig.base.json`. A test checks that the two stay identical, and skips itself outside the monorepo (no `pnpm-workspace.yaml` two levels up). `npm publish` refuses to run while the repository URL placeholders (`REPO_URL` and `STANDIN_REPO_URL` in angle brackets) remain in `package.json` or this README (`scripts/check-placeholders.mjs`).
+
+The test suite covers: template expansion and tier rules, each DLP detector, spoken-digit and Unicode evasion attempts (`dlp-evasion.test.ts`), the inbound classifier, `guardUtterance`'s never-throw contract, and regression cases found during review (`regressions-m1r*.test.ts`).
+
+## Contributing
+
+Issues and pull requests are welcome at <REPO_URL>. A new detector or bypass fix should come with a test that fails without it. Please do not paste real OTPs, card numbers or Aadhaar numbers into issues; use test values such as `4111 1111 1111 1111`.
 
 ## License
 

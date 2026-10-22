@@ -85,12 +85,12 @@ describe('runAutoplay', () => {
     expect(h.said.map(([, t]) => t)).toEqual([STORY_LINES.opening, STORY_LINES.goAhead, STORY_LINES.promise]);
   });
 
-  it('followup: two calls, "Two days later" banner between them, escalation line skipped when the follow-up call starts itself', async () => {
+  it('followup: two calls, "A week later" banner between them, escalation line skipped when the follow-up call starts itself', async () => {
     const h = fakeHost({ placesCallOn: [STORY_LINES.opening, STORY_LINES.followup] });
     const r = await runAutoplay(AUTOPLAY_SCRIPTS.followup, h.deps);
     expect(r.completed).toBe(true);
     expect(h.said.map(([, t]) => t)).toEqual([STORY_LINES.opening, STORY_LINES.followup]);
-    expect(h.banners.map(([, b]) => b)).toEqual(['Two days later…', null]);
+    expect(h.banners.map(([, b]) => b)).toEqual(['A week later…', null]);
     const tBanner = h.banners[0]?.[0] ?? 0;
     expect(tBanner).toBeGreaterThan(h.said[0]?.[0] ?? 0);
     expect(tBanner).toBeLessThan(h.said[1]?.[0] ?? 0);

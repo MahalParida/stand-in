@@ -1,0 +1,37 @@
+# CI for the standalone disclosure-guard repository.
+# In the Stand-In monorepo this file is inert (GitHub only reads the root .github/);
+# it becomes active once scripts/split-disclosure-guard.sh exports the package.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [22, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm test
+      - name: Pack and smoke-test the tarball
+        run: |
+          npm pack --pack-destination "$RUNNER_TEMP"
+          mkdir -p "$RUNNER_TEMP/consumer" && cd "$RUNNER_TEMP/consumer"
+          npm init -y >/dev/null
+          npm install "$RUNNER_TEMP"/standin-disclosure-guard-*.tgz
+          node --input-type=module -e "import { guardUtterance } from '@standin/disclosure-guard'; const r = guardUtterance('It is four eight two nine one one.', [{ key: 'otp', label: 'OTP', value: '482911', tier: 'never', approved: false }]); if (r.allowed) { console.error('guard did not block'); process.exit(1); } console.log('blocked as expected');"

@@ -1,11 +1,33 @@
 {
   "name": "@standin/disclosure-guard",
   "version": "0.1.0",
-  "private": true,
   "description": "Code-level disclosure guard for voice agents: template expansion with tiered facts, output DLP (OTP/PIN/card/Aadhaar/CVV/passwords, spoken-digit aware), inbound social-engineering and prompt-injection classifier, transcript masking.",
-  "keywords": ["dlp", "voice-agent", "prompt-injection", "otp", "pii", "guardrails", "llm-security"],
-  "type": "module",
+  "keywords": [
+    "dlp",
+    "voice-agent",
+    "llm-security",
+    "guardrails",
+    "prompt-injection",
+    "social-engineering",
+    "otp",
+    "pii",
+    "redaction",
+    "aadhaar",
+    "luhn",
+    "mcp"
+  ],
+  "author": "Mahal",
   "license": "MIT",
+  "homepage": "<REPO_URL>#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+<REPO_URL>.git"
+  },
+  "bugs": {
+    "url": "<REPO_URL>/issues"
+  },
+  "type": "module",
+  "sideEffects": false,
   "engines": {
     "node": ">=22"
   },
@@ -15,14 +37,37 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
-    }
+    },
+    "./package.json": "./package.json"
   },
-  "files": ["dist", "README.md", "LICENSE"],
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "dist/**/*.map",
+    "src/**/*.ts",
+    "!src/**/*.test.ts",
+    "!src/testing/**",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "vitest run"
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
+    "test": "vitest run",
+    "prepare": "npm run build",
+    "prepack": "npm run build",
+    "prepublishOnly": "node scripts/check-placeholders.mjs"
   },
   "dependencies": {
     "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "typescript": "6.0.3",
+    "vitest": "5.0.5"
   }
 }

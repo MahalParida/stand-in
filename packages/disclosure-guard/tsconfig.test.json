@@ -1,0 +1,9 @@
+{
+  "//": "Type-checks the tests and fixtures too (tsconfig.json excludes them from the build, and Vitest does not type-check). Used by `npm run typecheck`.",
+  "extends": "./tsconfig.standalone.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["dist", "node_modules"]
+}

@@ -61,7 +61,7 @@ export const STORY_LINES = {
   opening: 'Alexa, my BharatNet broadband has been down three days. Sort it out — I want a technician and a bill credit.',
   goAhead: 'Yes, go ahead and call them.',
   promise: 'Thanks. What happened with my complaint?',
-  followup: 'Alexa, what happened with my BharatNet complaint? The technician never came.',
+  followup: 'Alexa, what happened with my BharatNet complaint? The refund never came.',
   escalate: 'Call them again, quote the ticket and ask for a supervisor.',
 } as const;
 
@@ -89,7 +89,7 @@ export const AUTOPLAY_SCRIPTS: Record<AutoplayScenario, readonly AutoplayStep[]>
   followup: [
     ...openingSteps,
     { kind: 'wait', ms: 2000 },
-    { kind: 'banner', text: 'Two days later…' },
+    { kind: 'banner', text: 'A week later…' },
     { kind: 'wait', ms: 2500 },
     { kind: 'mark' },
     { kind: 'say', text: STORY_LINES.followup },
