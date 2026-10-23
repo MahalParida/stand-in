@@ -18,13 +18,13 @@
   ],
   "author": "Mahal",
   "license": "MIT",
-  "homepage": "<REPO_URL>#readme",
+  "homepage": "https://github.com/MahalParida/disclosure-guard#readme",
   "repository": {
     "type": "git",
-    "url": "git+<REPO_URL>.git"
+    "url": "git+https://github.com/MahalParida/disclosure-guard.git"
   },
   "bugs": {
-    "url": "<REPO_URL>/issues"
+    "url": "https://github.com/MahalParida/disclosure-guard/issues"
   },
   "type": "module",
   "sideEffects": false,

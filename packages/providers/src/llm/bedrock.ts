@@ -1,5 +1,5 @@
 /**
- * Amazon Bedrock Converse provider (spec 2.1; CLAUDE.md: must remain imported
+ * Amazon Bedrock Converse provider (spec 2.1; must remain imported
  * and wired). Uses the default AWS credential chain only — no keys in code.
  * The client is injectable so tests never touch the network.
  */

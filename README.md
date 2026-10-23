@@ -27,18 +27,16 @@ Read this first. Everything marked "simulated" says so in the UI and in the code
 
 ## Live demo
 
-> **TODO:** the hosted demo is not deployed yet. Replace these placeholders when it is.
+There is no hosted deployment yet: the new AWS account is stuck in verification (see [Limitations](#limitations-and-honest-notes)). Run it locally instead; it takes about two minutes and needs no AWS account or keys (Quick start below). Once running, these are the useful URLs:
 
 | What | Value |
 | :--- | :--- |
-| Simulated Alexa+ host | `<LIVE_URL>/` |
-| Autoplay takes | `<LIVE_URL>/?autoplay=happy`, `<LIVE_URL>/?autoplay=otp`, `<LIVE_URL>/?autoplay=followup` |
-| MCP endpoint (for your own MCP client, e.g. MCP Inspector) | `<LIVE_URL>/mcp` with `Authorization: Bearer <JUDGE_TOKEN>` |
-| Health | `<LIVE_URL>/health` |
+| Simulated Alexa+ host | `http://127.0.0.1:8787/` |
+| Autoplay takes | `/?autoplay=happy`, `/?autoplay=otp`, `/?autoplay=followup` |
+| MCP endpoint (for your own MCP client, e.g. MCP Inspector) | `http://127.0.0.1:8787/mcp` with `Authorization: Bearer $STANDIN_TOKEN` |
+| Health | `http://127.0.0.1:8787/health` |
 
-The hosted page fetches its token from `/sim/config` (`DEMO_EMBED_TOKEN=true`), so no login is needed in the browser. Cost is bounded by per-IP rate limits and global hourly and daily spend caps, not by the token.
-
-**Local alternative (works today, no AWS account or keys):** see Quick start below.
+When deployed (`scripts/deploy-lightsail.sh`), the hosted page fetches its token from `/sim/config` (`DEMO_EMBED_TOKEN=true`), and cost is bounded by per-IP rate limits and global hourly and daily spend caps.
 
 ---
 
@@ -47,7 +45,7 @@ The hosted page fetches its token from `/sim/config` (`DEMO_EMBED_TOKEN=true`), 
 Requirements: Node 22+, pnpm.
 
 ```bash
-git clone <REPO_URL> stand-in && cd stand-in
+git clone https://github.com/MahalParida/stand-in.git stand-in && cd stand-in
 pnpm i
 pnpm demo
 ```

@@ -2,11 +2,11 @@
 
 ![tests: 297 passing](https://img.shields.io/badge/tests-297%20passing-brightgreen) ![license: MIT](https://img.shields.io/badge/license-MIT-blue) ![node: >=22](https://img.shields.io/badge/node-%3E%3D22-informational)
 
-<!-- Badge text is static. Update the test count from `npm test` when tests change. TODO: swap for the CI status badge once the repo exists: <REPO_URL>/actions/workflows/ci.yml/badge.svg -->
+<!-- Badge text is static. Update the test count from `npm test` when tests change. TODO: swap for the CI status badge once the repo exists: https://github.com/MahalParida/disclosure-guard/actions/workflows/ci.yml/badge.svg -->
 
 A disclosure guard for voice agents that call businesses for a user, written as code rather than as a prompt. It keeps one-time passwords, PINs, CVVs, card numbers, passwords and Aadhaar numbers from being spoken, even when the LLM tries to say them. It also treats everything the other party says as untrusted input.
 
-The npm package name is `@standin/disclosure-guard`. It was extracted from [Stand-In](<STANDIN_REPO_URL>), an Alexa+ add-on that makes customer-care calls for a user, where every outbound utterance passes through this package before text-to-speech. It has one runtime dependency (`zod`), no network or file I/O, and is MIT licensed.
+The npm package name is `@standin/disclosure-guard`. It was extracted from [Stand-In](https://github.com/MahalParida/stand-in), an Alexa+ add-on that makes customer-care calls for a user, where every outbound utterance passes through this package before text-to-speech. It has one runtime dependency (`zod`), no network or file I/O, and is MIT licensed.
 
 ## Install
 
@@ -15,7 +15,7 @@ The npm package name is `@standin/disclosure-guard`. It was extracted from [Stan
 ```sh
 # from Git: npm runs the `prepare` script, which builds dist/ from source
 # (TypeScript is a devDependency, so npm installs it for that step)
-npm install git+<REPO_URL>.git
+npm install git+https://github.com/MahalParida/disclosure-guard.git
 
 # after an npm release
 npm install @standin/disclosure-guard
@@ -224,7 +224,7 @@ The test suite covers: template expansion and tier rules, each DLP detector, spo
 
 ## Contributing
 
-Issues and pull requests are welcome at <REPO_URL>. A new detector or bypass fix should come with a test that fails without it. Please do not paste real OTPs, card numbers or Aadhaar numbers into issues; use test values such as `4111 1111 1111 1111`.
+Issues and pull requests are welcome at https://github.com/MahalParida/disclosure-guard. A new detector or bypass fix should come with a test that fails without it. Please do not paste real OTPs, card numbers or Aadhaar numbers into issues; use test values such as `4111 1111 1111 1111`.
 
 ## License
 
